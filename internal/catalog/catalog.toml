@@ -1,0 +1,797 @@
+# Built-in catalog of configuration files.
+#
+# Each [[category]] becomes a top-level folder. Entry fields:
+#   name     short label (usually the file name)
+#   desc     one-line description
+#   path     absolute path; ~ and $XDG_CONFIG_HOME are expanded
+#   kind     "file" (default), "dir" (expands to its contents) or "glob"
+#   distros  families the entry applies to; omitted = all of arch, debian, fedora
+#   hint     reminder shown after the file is edited (never executed)
+#   hints    per-family hint overriding `hint`, e.g. { debian = "sudo update-grub" }
+#   defaults vendor copy used when the file does not exist yet (Fedora ships
+#            systemd's *.conf only in /usr/lib); confnav offers to start from it
+#
+# The ID of an entry is "<category id>:<path>", so changing a path or moving an
+# entry to another category un-hides it for users who hid it.
+
+[[category]]
+id = "dns"
+name = "DNS"
+
+  [[category.entry]]
+  name = "resolv.conf"
+  desc = "Nameservers and search domains (often managed by resolved/NetworkManager)"
+  path = "/etc/resolv.conf"
+
+  [[category.entry]]
+  name = "hosts"
+  desc = "Static hostname to IP mappings"
+  path = "/etc/hosts"
+
+  [[category.entry]]
+  name = "nsswitch.conf"
+  desc = "Name service lookup order (files, dns, mdns, myhostname)"
+  path = "/etc/nsswitch.conf"
+
+  [[category.entry]]
+  name = "resolved.conf"
+  desc = "systemd-resolved: DNS servers, DNS over TLS, DNSSEC"
+  path = "/etc/systemd/resolved.conf"
+  defaults = "/usr/lib/systemd/resolved.conf"
+  hint = "sudo systemctl restart systemd-resolved"
+
+  [[category.entry]]
+  name = "resolved.conf.d"
+  desc = "Drop-in overrides for systemd-resolved"
+  path = "/etc/systemd/resolved.conf.d"
+  kind = "dir"
+  hint = "sudo systemctl restart systemd-resolved"
+
+  [[category.entry]]
+  name = "dnsmasq.conf"
+  desc = "dnsmasq local DNS cache and DHCP server"
+  path = "/etc/dnsmasq.conf"
+  hint = "sudo systemctl restart dnsmasq"
+
+[[category]]
+id = "network"
+name = "Network"
+
+  [[category.entry]]
+  name = "hostname"
+  desc = "Machine host name"
+  path = "/etc/hostname"
+  hint = "Or use: sudo hostnamectl set-hostname NAME"
+
+  [[category.entry]]
+  name = "NetworkManager.conf"
+  desc = "NetworkManager main configuration"
+  path = "/etc/NetworkManager/NetworkManager.conf"
+  hint = "sudo systemctl reload NetworkManager"
+
+  [[category.entry]]
+  name = "NetworkManager conf.d"
+  desc = "NetworkManager drop-in configuration"
+  path = "/etc/NetworkManager/conf.d"
+  kind = "dir"
+  hint = "sudo systemctl reload NetworkManager"
+
+  [[category.entry]]
+  name = "system-connections"
+  desc = "Saved NetworkManager connections (Wi-Fi, VPN, ethernet)"
+  path = "/etc/NetworkManager/system-connections"
+  kind = "dir"
+  hint = "sudo nmcli connection reload"
+
+  [[category.entry]]
+  name = "systemd network"
+  desc = "systemd-networkd .network, .netdev and .link files"
+  path = "/etc/systemd/network"
+  kind = "dir"
+  hint = "sudo networkctl reload"
+
+  [[category.entry]]
+  name = "iwd main.conf"
+  desc = "iwd wireless daemon settings"
+  path = "/etc/iwd/main.conf"
+  hint = "sudo systemctl restart iwd"
+
+  [[category.entry]]
+  name = "netctl"
+  desc = "netctl profiles"
+  path = "/etc/netctl"
+  kind = "dir"
+  distros = ["arch"]
+
+  [[category.entry]]
+  name = "interfaces"
+  desc = "ifupdown interface configuration"
+  path = "/etc/network/interfaces"
+  distros = ["debian"]
+  hint = "sudo systemctl restart networking"
+
+  [[category.entry]]
+  name = "interfaces.d"
+  desc = "ifupdown interface snippets"
+  path = "/etc/network/interfaces.d"
+  kind = "dir"
+  distros = ["debian"]
+  hint = "sudo systemctl restart networking"
+
+  [[category.entry]]
+  name = "netplan"
+  desc = "Netplan YAML network configuration (Ubuntu)"
+  path = "/etc/netplan"
+  kind = "dir"
+  distros = ["debian"]
+  hint = "sudo netplan try   # then: sudo netplan apply"
+
+[[category]]
+id = "systemd"
+name = "Systemd"
+
+  [[category.entry]]
+  name = "system.conf"
+  desc = "systemd manager settings: timeouts, limits, watchdog"
+  path = "/etc/systemd/system.conf"
+  defaults = "/usr/lib/systemd/system.conf"
+  hint = "sudo systemctl daemon-reexec"
+
+  [[category.entry]]
+  name = "user.conf"
+  desc = "systemd user manager settings"
+  path = "/etc/systemd/user.conf"
+  defaults = "/usr/lib/systemd/user.conf"
+  hint = "Applies on next login"
+
+  [[category.entry]]
+  name = "journald.conf"
+  desc = "Journal size, retention and forwarding"
+  path = "/etc/systemd/journald.conf"
+  defaults = "/usr/lib/systemd/journald.conf"
+  hint = "sudo systemctl restart systemd-journald"
+
+  [[category.entry]]
+  name = "logind.conf"
+  desc = "Lid switch, power key and idle actions"
+  path = "/etc/systemd/logind.conf"
+  defaults = "/usr/lib/systemd/logind.conf"
+  hint = "Applies after reboot (restarting systemd-logind ends sessions)"
+
+  [[category.entry]]
+  name = "sleep.conf"
+  desc = "Suspend and hibernate behaviour"
+  path = "/etc/systemd/sleep.conf"
+  defaults = "/usr/lib/systemd/sleep.conf"
+
+  [[category.entry]]
+  name = "coredump.conf"
+  desc = "Core dump storage and size limits"
+  path = "/etc/systemd/coredump.conf"
+  defaults = "/usr/lib/systemd/coredump.conf"
+
+  [[category.entry]]
+  name = "system"
+  desc = "Local unit files, overrides and .wants links"
+  path = "/etc/systemd/system"
+  kind = "dir"
+  hint = "sudo systemctl daemon-reload"
+
+  [[category.entry]]
+  name = "*.d/*.conf"
+  desc = "Drop-in overrides created by systemctl edit"
+  path = "/etc/systemd/system/*.d/*.conf"
+  kind = "glob"
+  hint = "sudo systemctl daemon-reload"
+
+  [[category.entry]]
+  name = "user units"
+  desc = "Your own systemd user units"
+  path = "$XDG_CONFIG_HOME/systemd/user"
+  kind = "dir"
+  hint = "systemctl --user daemon-reload"
+
+  [[category.entry]]
+  name = "tmpfiles.d"
+  desc = "Rules for creating and cleaning files and directories"
+  path = "/etc/tmpfiles.d"
+  kind = "dir"
+  hint = "sudo systemd-tmpfiles --create"
+
+[[category]]
+id = "boot"
+name = "Boot"
+
+  [[category.entry]]
+  name = "grub"
+  desc = "GRUB kernel parameters, timeout and default entry"
+  path = "/etc/default/grub"
+  hints = { arch = "sudo grub-mkconfig -o /boot/grub/grub.cfg", debian = "sudo update-grub", fedora = "sudo grub2-mkconfig -o /boot/grub2/grub.cfg" }
+
+  [[category.entry]]
+  name = "grub.d"
+  desc = "Scripts that generate the GRUB menu"
+  path = "/etc/grub.d"
+  kind = "dir"
+  hints = { arch = "sudo grub-mkconfig -o /boot/grub/grub.cfg", debian = "sudo update-grub", fedora = "sudo grub2-mkconfig -o /boot/grub2/grub.cfg" }
+
+  [[category.entry]]
+  name = "loader.conf"
+  desc = "systemd-boot menu timeout and default entry"
+  path = "/boot/loader/loader.conf"
+
+  [[category.entry]]
+  name = "loader entries"
+  desc = "systemd-boot boot entries"
+  path = "/boot/loader/entries"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "cmdline"
+  desc = "Kernel command line for UKIs and kernel-install"
+  path = "/etc/kernel/cmdline"
+  hints = { arch = "Rebuild the UKI: sudo mkinitcpio -P", fedora = "sudo kernel-install add-all" }
+
+  [[category.entry]]
+  name = "mkinitcpio.conf"
+  desc = "Initramfs modules, hooks and compression"
+  path = "/etc/mkinitcpio.conf"
+  distros = ["arch"]
+  hint = "sudo mkinitcpio -P"
+
+  [[category.entry]]
+  name = "mkinitcpio.d"
+  desc = "mkinitcpio presets per kernel"
+  path = "/etc/mkinitcpio.d"
+  kind = "dir"
+  distros = ["arch"]
+  hint = "sudo mkinitcpio -P"
+
+  [[category.entry]]
+  name = "dracut.conf.d"
+  desc = "Dracut initramfs configuration"
+  path = "/etc/dracut.conf.d"
+  kind = "dir"
+  distros = ["arch", "fedora"]
+  hint = "sudo dracut --regenerate-all --force"
+
+  [[category.entry]]
+  name = "initramfs.conf"
+  desc = "initramfs-tools settings"
+  path = "/etc/initramfs-tools/initramfs.conf"
+  distros = ["debian"]
+  hint = "sudo update-initramfs -u"
+
+  [[category.entry]]
+  name = "initramfs modules"
+  desc = "Extra modules to include in the initramfs"
+  path = "/etc/initramfs-tools/modules"
+  distros = ["debian"]
+  hint = "sudo update-initramfs -u"
+
+[[category]]
+id = "packages"
+name = "Packages"
+
+  [[category.entry]]
+  name = "pacman.conf"
+  desc = "Repositories, parallel downloads, ignored packages"
+  path = "/etc/pacman.conf"
+  distros = ["arch"]
+  hint = "sudo pacman -Syu"
+
+  [[category.entry]]
+  name = "mirrorlist"
+  desc = "Pacman mirror servers"
+  path = "/etc/pacman.d/mirrorlist"
+  distros = ["arch"]
+  hint = "sudo pacman -Syyu"
+
+  [[category.entry]]
+  name = "pacman hooks"
+  desc = "Pacman transaction hooks"
+  path = "/etc/pacman.d/hooks"
+  kind = "dir"
+  distros = ["arch"]
+
+  [[category.entry]]
+  name = "makepkg.conf"
+  desc = "Compiler flags and options for makepkg / AUR builds"
+  path = "/etc/makepkg.conf"
+  distros = ["arch"]
+
+  [[category.entry]]
+  name = "makepkg.conf.d"
+  desc = "makepkg drop-in configuration"
+  path = "/etc/makepkg.conf.d"
+  kind = "dir"
+  distros = ["arch"]
+
+  [[category.entry]]
+  name = "paru.conf"
+  desc = "paru AUR helper settings"
+  path = "$XDG_CONFIG_HOME/paru/paru.conf"
+  distros = ["arch"]
+
+  [[category.entry]]
+  name = "sources.list"
+  desc = "APT repositories (classic format)"
+  path = "/etc/apt/sources.list"
+  distros = ["debian"]
+  hint = "sudo apt update"
+
+  [[category.entry]]
+  name = "sources.list.d"
+  desc = "APT repositories (.list and deb822 .sources)"
+  path = "/etc/apt/sources.list.d"
+  kind = "dir"
+  distros = ["debian"]
+  hint = "sudo apt update"
+
+  [[category.entry]]
+  name = "apt.conf.d"
+  desc = "APT options"
+  path = "/etc/apt/apt.conf.d"
+  kind = "dir"
+  distros = ["debian"]
+
+  [[category.entry]]
+  name = "preferences.d"
+  desc = "APT pinning and priorities"
+  path = "/etc/apt/preferences.d"
+  kind = "dir"
+  distros = ["debian"]
+  hint = "Check with: apt-cache policy"
+
+  [[category.entry]]
+  name = "50unattended-upgrades"
+  desc = "Automatic security updates"
+  path = "/etc/apt/apt.conf.d/50unattended-upgrades"
+  distros = ["debian"]
+
+  [[category.entry]]
+  name = "dnf.conf"
+  desc = "DNF options: parallel downloads, installonly limit"
+  path = "/etc/dnf/dnf.conf"
+  distros = ["fedora"]
+
+  [[category.entry]]
+  name = "yum.repos.d"
+  desc = "DNF repositories"
+  path = "/etc/yum.repos.d"
+  kind = "dir"
+  distros = ["fedora"]
+  hint = "sudo dnf makecache"
+
+  [[category.entry]]
+  name = "automatic.conf"
+  desc = "dnf-automatic update settings"
+  path = "/etc/dnf/automatic.conf"
+  distros = ["fedora"]
+
+[[category]]
+id = "filesystems"
+name = "Filesystems"
+
+  [[category.entry]]
+  name = "fstab"
+  desc = "Filesystems mounted at boot"
+  path = "/etc/fstab"
+  hint = "sudo systemctl daemon-reload && sudo mount -a"
+
+  [[category.entry]]
+  name = "crypttab"
+  desc = "Encrypted volumes unlocked at boot"
+  path = "/etc/crypttab"
+  hint = "sudo systemctl daemon-reload"
+
+  [[category.entry]]
+  name = "zram-generator.conf"
+  desc = "zram swap size and compression"
+  path = "/etc/systemd/zram-generator.conf"
+  defaults = "/usr/lib/systemd/zram-generator.conf"
+  hint = "sudo systemctl daemon-reload && sudo systemctl restart systemd-zram-setup@zram0"
+
+[[category]]
+id = "kernel"
+name = "Kernel & Hardware"
+
+  [[category.entry]]
+  name = "sysctl.conf"
+  desc = "Kernel parameters (legacy single file)"
+  path = "/etc/sysctl.conf"
+  distros = ["debian", "fedora"]
+  hint = "sudo sysctl --system"
+
+  [[category.entry]]
+  name = "sysctl.d"
+  desc = "Kernel parameters"
+  path = "/etc/sysctl.d"
+  kind = "dir"
+  hint = "sudo sysctl --system"
+
+  [[category.entry]]
+  name = "modprobe.d"
+  desc = "Kernel module options and blacklists"
+  path = "/etc/modprobe.d"
+  kind = "dir"
+  hint = "Regenerate the initramfs if the module loads early"
+
+  [[category.entry]]
+  name = "modules-load.d"
+  desc = "Kernel modules loaded at boot"
+  path = "/etc/modules-load.d"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "modules"
+  desc = "Kernel modules loaded at boot (Debian)"
+  path = "/etc/modules"
+  distros = ["debian"]
+
+  [[category.entry]]
+  name = "udev rules.d"
+  desc = "Device rules and permissions"
+  path = "/etc/udev/rules.d"
+  kind = "dir"
+  hint = "sudo udevadm control --reload && sudo udevadm trigger"
+
+  [[category.entry]]
+  name = "tlp.conf"
+  desc = "TLP laptop power management"
+  path = "/etc/tlp.conf"
+  hint = "sudo tlp start"
+
+[[category]]
+id = "auth"
+name = "Users & Auth"
+
+  [[category.entry]]
+  name = "sudoers"
+  desc = "sudo rules (opened safely with visudo)"
+  path = "/etc/sudoers"
+
+  [[category.entry]]
+  name = "sudoers.d"
+  desc = "sudo rule snippets (opened with visudo)"
+  path = "/etc/sudoers.d"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "group"
+  desc = "Groups and members (opened with vigr)"
+  path = "/etc/group"
+
+  [[category.entry]]
+  name = "passwd"
+  desc = "User accounts (opened with vipw)"
+  path = "/etc/passwd"
+
+  [[category.entry]]
+  name = "login.defs"
+  desc = "Defaults for useradd: UID ranges, password aging"
+  path = "/etc/login.defs"
+
+  [[category.entry]]
+  name = "pam.d"
+  desc = "PAM authentication stacks"
+  path = "/etc/pam.d"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "limits.conf"
+  desc = "Resource limits (open files, processes)"
+  path = "/etc/security/limits.conf"
+  hint = "Applies on next login"
+
+  [[category.entry]]
+  name = "faillock.conf"
+  desc = "Account lockout after failed logins"
+  path = "/etc/security/faillock.conf"
+
+  [[category.entry]]
+  name = "polkit rules.d"
+  desc = "Polkit authorization rules"
+  path = "/etc/polkit-1/rules.d"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "shells"
+  desc = "Valid login shells"
+  path = "/etc/shells"
+
+[[category]]
+id = "ssh"
+name = "SSH"
+
+  [[category.entry]]
+  name = "sshd_config"
+  desc = "SSH server: port, root login, password auth"
+  path = "/etc/ssh/sshd_config"
+  hint = "sudo sshd -t && sudo systemctl reload sshd"
+  hints = { debian = "sudo sshd -t && sudo systemctl reload ssh" }
+
+  [[category.entry]]
+  name = "sshd_config.d"
+  desc = "SSH server drop-in configuration"
+  path = "/etc/ssh/sshd_config.d"
+  kind = "dir"
+  hint = "sudo sshd -t && sudo systemctl reload sshd"
+  hints = { debian = "sudo sshd -t && sudo systemctl reload ssh" }
+
+  [[category.entry]]
+  name = "ssh_config"
+  desc = "SSH client system-wide defaults"
+  path = "/etc/ssh/ssh_config"
+
+  [[category.entry]]
+  name = "~/.ssh/config"
+  desc = "Your SSH client hosts, keys and options"
+  path = "~/.ssh/config"
+
+  [[category.entry]]
+  name = "authorized_keys"
+  desc = "Public keys allowed to log in as you"
+  path = "~/.ssh/authorized_keys"
+
+[[category]]
+id = "firewall"
+name = "Firewall"
+
+  [[category.entry]]
+  name = "nftables.conf"
+  desc = "nftables ruleset loaded at boot"
+  path = "/etc/nftables.conf"
+  distros = ["arch", "debian"]
+  hint = "sudo nft -c -f /etc/nftables.conf && sudo systemctl reload nftables"
+
+  [[category.entry]]
+  name = "nftables.conf"
+  desc = "nftables ruleset loaded at boot"
+  path = "/etc/sysconfig/nftables.conf"
+  distros = ["fedora"]
+  hint = "sudo systemctl reload nftables"
+
+  [[category.entry]]
+  name = "ufw.conf"
+  desc = "UFW enable flag and log level"
+  path = "/etc/ufw/ufw.conf"
+  distros = ["arch", "debian"]
+  hint = "sudo ufw reload"
+
+  [[category.entry]]
+  name = "default/ufw"
+  desc = "UFW default policies and IPv6"
+  path = "/etc/default/ufw"
+  distros = ["arch", "debian"]
+  hint = "sudo ufw reload"
+
+  [[category.entry]]
+  name = "before.rules"
+  desc = "UFW rules applied before user rules (NAT, ICMP)"
+  path = "/etc/ufw/before.rules"
+  distros = ["arch", "debian"]
+  hint = "sudo ufw reload"
+
+  [[category.entry]]
+  name = "firewalld.conf"
+  desc = "firewalld main settings"
+  path = "/etc/firewalld/firewalld.conf"
+  distros = ["arch", "fedora"]
+  hint = "sudo firewall-cmd --reload"
+
+  [[category.entry]]
+  name = "firewalld zones"
+  desc = "firewalld zone definitions"
+  path = "/etc/firewalld/zones"
+  kind = "dir"
+  distros = ["arch", "fedora"]
+  hint = "sudo firewall-cmd --reload"
+
+[[category]]
+id = "locale"
+name = "Locale & Time"
+
+  [[category.entry]]
+  name = "locale.conf"
+  desc = "System language and formats"
+  path = "/etc/locale.conf"
+  distros = ["arch", "fedora"]
+  hint = "Applies on next login"
+
+  [[category.entry]]
+  name = "locale.gen"
+  desc = "Locales to generate"
+  path = "/etc/locale.gen"
+  distros = ["arch", "debian"]
+  hint = "sudo locale-gen"
+
+  [[category.entry]]
+  name = "default/locale"
+  desc = "System language and formats"
+  path = "/etc/default/locale"
+  distros = ["debian"]
+  hint = "Applies on next login"
+
+  [[category.entry]]
+  name = "vconsole.conf"
+  desc = "Console keymap and font"
+  path = "/etc/vconsole.conf"
+  distros = ["arch", "fedora"]
+
+  [[category.entry]]
+  name = "default/keyboard"
+  desc = "Console and X11 keyboard layout"
+  path = "/etc/default/keyboard"
+  distros = ["debian"]
+  hint = "sudo setupcon"
+
+  [[category.entry]]
+  name = "timesyncd.conf"
+  desc = "systemd-timesyncd NTP servers"
+  path = "/etc/systemd/timesyncd.conf"
+  defaults = "/usr/lib/systemd/timesyncd.conf"
+  hint = "sudo systemctl restart systemd-timesyncd"
+
+  [[category.entry]]
+  name = "chrony.conf"
+  desc = "chrony NTP servers"
+  path = "/etc/chrony.conf"
+  distros = ["arch", "fedora"]
+  hint = "sudo systemctl restart chronyd"
+
+  [[category.entry]]
+  name = "chrony.conf"
+  desc = "chrony NTP servers"
+  path = "/etc/chrony/chrony.conf"
+  distros = ["debian"]
+  hint = "sudo systemctl restart chrony"
+
+[[category]]
+id = "shell"
+name = "Shell & Environment"
+
+  [[category.entry]]
+  name = ".bashrc"
+  desc = "Your interactive bash settings"
+  path = "~/.bashrc"
+  hint = "source ~/.bashrc"
+
+  [[category.entry]]
+  name = ".bash_profile"
+  desc = "Your bash login settings"
+  path = "~/.bash_profile"
+
+  [[category.entry]]
+  name = ".zshrc"
+  desc = "Your interactive zsh settings"
+  path = "~/.zshrc"
+  hint = "source ~/.zshrc"
+
+  [[category.entry]]
+  name = ".profile"
+  desc = "Your login shell environment"
+  path = "~/.profile"
+
+  [[category.entry]]
+  name = "config.fish"
+  desc = "Your fish shell settings"
+  path = "$XDG_CONFIG_HOME/fish/config.fish"
+
+  [[category.entry]]
+  name = "environment.d"
+  desc = "Your environment for the systemd user session"
+  path = "$XDG_CONFIG_HOME/environment.d"
+  kind = "dir"
+  hint = "Applies on next login"
+
+  [[category.entry]]
+  name = "environment"
+  desc = "System-wide environment variables"
+  path = "/etc/environment"
+  hint = "Applies on next login"
+
+  [[category.entry]]
+  name = "profile"
+  desc = "System-wide login shell setup"
+  path = "/etc/profile"
+
+  [[category.entry]]
+  name = "profile.d"
+  desc = "System-wide login shell snippets"
+  path = "/etc/profile.d"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "bash.bashrc"
+  desc = "System-wide interactive bash settings"
+  path = "/etc/bash.bashrc"
+  distros = ["arch", "debian"]
+
+  [[category.entry]]
+  name = "bashrc"
+  desc = "System-wide interactive bash settings"
+  path = "/etc/bashrc"
+  distros = ["fedora"]
+
+[[category]]
+id = "desktop"
+name = "Desktop"
+
+  [[category.entry]]
+  name = "xorg.conf.d"
+  desc = "Xorg input, monitor and driver snippets"
+  path = "/etc/X11/xorg.conf.d"
+  kind = "dir"
+  hint = "Restart the X session"
+
+  [[category.entry]]
+  name = "sddm.conf.d"
+  desc = "SDDM display manager settings"
+  path = "/etc/sddm.conf.d"
+  kind = "dir"
+
+  [[category.entry]]
+  name = "gdm custom.conf"
+  desc = "GDM: Wayland, automatic login"
+  path = "/etc/gdm/custom.conf"
+  distros = ["arch", "fedora"]
+
+  [[category.entry]]
+  name = "gdm3 custom.conf"
+  desc = "GDM: Wayland, automatic login"
+  path = "/etc/gdm3/custom.conf"
+  distros = ["debian"]
+
+  [[category.entry]]
+  name = "lightdm.conf"
+  desc = "LightDM display manager settings"
+  path = "/etc/lightdm/lightdm.conf"
+
+  [[category.entry]]
+  name = "mimeapps.list"
+  desc = "Your default applications per file type"
+  path = "$XDG_CONFIG_HOME/mimeapps.list"
+
+  [[category.entry]]
+  name = "fonts.conf"
+  desc = "Your fontconfig settings"
+  path = "$XDG_CONFIG_HOME/fontconfig/fonts.conf"
+  hint = "fc-cache -f"
+
+  [[category.entry]]
+  name = "autostart"
+  desc = "Your autostarted applications"
+  path = "$XDG_CONFIG_HOME/autostart"
+  kind = "dir"
+
+[[category]]
+id = "audio"
+name = "Audio"
+
+  [[category.entry]]
+  name = "pipewire"
+  desc = "Your PipeWire overrides"
+  path = "$XDG_CONFIG_HOME/pipewire"
+  kind = "dir"
+  hint = "systemctl --user restart pipewire pipewire-pulse wireplumber"
+
+  [[category.entry]]
+  name = "wireplumber"
+  desc = "Your WirePlumber session manager overrides"
+  path = "$XDG_CONFIG_HOME/wireplumber"
+  kind = "dir"
+  hint = "systemctl --user restart wireplumber"
+
+  [[category.entry]]
+  name = "system pipewire"
+  desc = "System-wide PipeWire overrides"
+  path = "/etc/pipewire"
+  kind = "dir"
+  hint = "systemctl --user restart pipewire pipewire-pulse wireplumber"
+
+  [[category.entry]]
+  name = "alsa-base.conf"
+  desc = "ALSA sound card module options"
+  path = "/etc/modprobe.d/alsa-base.conf"
+  hint = "Reboot or reload the snd modules"

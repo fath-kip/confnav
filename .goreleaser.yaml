@@ -1,0 +1,67 @@
+# GoReleaser config: builds static Linux binaries and .deb/.rpm/Arch packages.
+# Test locally with: goreleaser release --snapshot --clean
+version: 2
+
+project_name: confnav
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - main: ./cmd/confnav
+    binary: confnav
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+nfpms:
+  - id: packages
+    package_name: confnav
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: fath-kip
+    homepage: https://github.com/fath-kip/confnav
+    maintainer: fath-kip <343930408+fath-kip@users.noreply.github.com>
+    description: |-
+      Terminal navigator for configuration files.
+      Browse well-known config files of Arch, Debian and Fedora by category,
+      keep your own folders of favourites and open them in your editor.
+    license: MIT
+    formats: [deb, rpm, archlinux]
+    bindir: /usr/bin
+    section: utils
+    contents:
+      - src: LICENSE
+        dst: /usr/share/licenses/confnav/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/confnav/README.md
+    archlinux:
+      packager: fath-kip <343930408+fath-kip@users.noreply.github.com>
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: fath-kip
+    name: confnav
+  footer: |
+    **Install:** see the [README](https://github.com/fath-kip/confnav#install).
