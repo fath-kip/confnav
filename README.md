@@ -21,7 +21,7 @@ NAME                  DESCRIPTION                               PATH            
 +
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 /etc/systemd/resolved.conf · after edit: sudo systemctl restart systemd-resolved
-enter open · a add · r edit · d remove · / search · shift+e editor · shift+s settings · shift+m hide missing · ? help · q quit
+enter open · a add · r edit · d remove · / search · shift+s settings · shift+p prefs · shift+m hide missing · ? help · q quit
 ```
 
 ## Features
@@ -37,10 +37,18 @@ enter open · a add · r edit · d remove · / search · shift+e editor · shift
   confnav only shows them; it never runs commands for you.
 - **Directories and globs**: entries like `/etc/sudoers.d` or `/etc/systemd/system/*.d/*.conf` expand
   to the files inside.
+- **Guided first start**: confnav asks for your editor, which categories you want, whether to show
+  files you don't have and whether to scan the system. `shift+p` brings these preferences back.
+- **Finds what the catalog doesn't know**: a scan (`shift+f`) looks through `/etc`, the boot loader,
+  `~/.config` and your dotfiles and adds the configuration files it finds to the matching categories;
+  the rest goes to *Applications* (per app) and *Other*. As root (through `sudo`) it also sees
+  directories only root can read. Backups, keys, certificates, caches and binary files are skipped.
 - **Your own folders**: add folders, files, directories or globs anywhere, including the top level
-  (the `+` row at the bottom). Copy built-in entries into your folders, rename or hide built-ins you
-  don't need. confnav never deletes or changes files on disk.
-- **Hide what you don't have**: `shift+m` hides every built-in file that doesn't exist on your system
+  (the `+` row at the bottom). Rename, copy, move or remove anything in the list.
+  confnav never deletes or changes files on disk.
+- **Everything is in one file**: categories and their files live in `config.toml` next to the
+  settings, with a comment on every line, so you can edit the list there too.
+- **Hide what you don't have**: `shift+m` hides every listed file that doesn't exist on your system
   and shows them again. Install a package later and its files simply appear.
 - **Its own settings are one key away**: `shift+s` opens confnav's config file. Save it and the new
   settings, key bindings included, apply immediately.
@@ -67,8 +75,9 @@ ARM64 (`aarch64`) packages are published too. With Go installed you can also run
 ```
 confnav               start
 confnav dns           start with a search for "dns"
-confnav --list        print the catalog for this system (name, kind, state, path)
-confnav --distro fedora   use another distribution's catalog
+confnav --list        print your list (category, name, kind, state, path)
+confnav --scan        print the configuration files a scan finds (sudo confnav --scan for everything)
+confnav --distro fedora   use another distribution's catalog for new categories
 ```
 
 | Key | Action |
@@ -79,16 +88,17 @@ confnav --distro fedora   use another distribution's catalog
 | `o` | open once with another editor |
 | `shift+e` | choose the default editor |
 | `shift+s` | open confnav's own settings (`config.toml`) |
+| `shift+p` | preferences: editor, categories, missing files, scanning |
+| `shift+f` | scan the system for configuration files that are not listed yet |
 | `/` | search; `esc` shows the result in the tree |
 | `a` | add a file, directory, glob or folder to the selected folder (`tab` completes paths) |
 | `r` | rename or edit |
 | `c` / `m` | copy / move to another folder |
-| `d` | remove from the list (built-ins are hidden, files on disk are never touched) |
-| `shift+r` | restore hidden built-ins |
+| `d` | remove from the list (files on disk are never touched) |
 | `shift+m` | hide / show files that don't exist on this system |
 | `y` | copy the path to the clipboard (OSC 52, works over SSH) |
 | `ctrl+r` | refresh and reload settings |
-| `?` | help |
+| `?` | help (scroll with `↑↓`, any other key closes it) |
 | `q` | quit |
 
 The `+` row at the bottom adds at the top level (enter or double-click). With the mouse, a click
@@ -96,32 +106,59 @@ toggles a folder and a double-click opens a file.
 
 ## Configuration
 
-On first start confnav asks which editor to use. Settings live in `~/.config/confnav/config.toml`,
-which `shift+s` opens in your editor; saving it applies the changes immediately
-(a file with a syntax error keeps the previous settings and shows the error).
+On first start confnav asks a few questions (editor, categories, missing files, scanning); `shift+p`
+asks them again later. Everything is stored in `~/.config/confnav/config.toml`, which `shift+s` opens
+in your editor. Saving it applies the changes immediately; a file with an error keeps the previous
+settings and shows the error. Every setting and key has its explanation in a comment above it:
 
 ```toml
-editor = "micro"                 # empty: $VISUAL, then $EDITOR, then the first installed editor
-backup = false                   # copy files to ~/.local/state/confnav/backups before opening
-mouse = true                     # mouse support (hold Shift to select text)
-recent_limit = 20
-date_format = "2006-01-02 15:04" # Go time layout
-show_missing = true              # list built-in files that don't exist here (shift+m)
+# Command that opens files, e.g. "micro", "nano", "vim", "nvim -p".
+# Empty means: $VISUAL, then $EDITOR, then the first installed editor. (shift+e)
+editor = "micro"
 
-[keys]                           # every action, with one key or a list of keys
-add = "a"
+# How a scan (shift+f) runs: "user" sees what you can read, "root" uses sudo
+# to also see protected directories. Empty: ask on the next scan.
+scan_as = "user"
+
+[keys]
+
+# Rename or edit.
 edit = ["r", "f2"]
-editor = "shift+e"               # same as "E"
-quit = "q"
 ```
 
 The actions are `up`, `down`, `collapse`, `expand`, `top`, `bottom`, `page_up`, `page_down`, `open`,
-`open_with`, `editor`, `settings`, `add`, `edit`, `copy`, `move`, `remove`, `restore`, `toggle_missing`,
-`yank`, `refresh`, `search`, `help` and `quit`. Actions you leave out keep their default keys; `ctrl+c` always
-quits. Unknown actions and keys bound twice are reported in the status line.
+`open_with`, `editor`, `settings`, `preferences`, `scan`, `add`, `edit`, `copy`, `move`, `remove`,
+`toggle_missing`, `yank`, `refresh`, `search`, `help` and `quit`. Actions you leave out keep their
+default keys; `ctrl+c` always quits. Unknown actions and keys bound twice are reported in the status line.
 
-Your folders, hidden entries and renames are stored in `~/.local/share/confnav/library.json` and
-the recent list in `~/.local/state/confnav/recent.json`. `NO_COLOR` is respected.
+The list itself is under `[category_structure]`, in the order it is shown:
+
+```toml
+[category_structure]
+ignore = []                              # scan results you removed; a new scan skips them
+
+[[category_structure.category]]
+catalog = "dns"                          # the built-in topic; leave it out for your own
+name = "DNS"
+
+  [[category_structure.category.entry]]
+  name = "resolved.conf"
+  desc = "systemd-resolved: DNS servers, DNS over TLS, DNSSEC"
+  path = "/etc/systemd/resolved.conf"
+  kind = "file"                          # or "dir", or "glob" for e.g. /etc/sysctl.d/*.conf
+  hint = "sudo systemctl restart systemd-resolved"
+  defaults = "/usr/lib/systemd/resolved.conf"
+
+  [[category_structure.category.folder]] # folders nest: …folder.entry, …folder.folder
+  name = "VPN"
+```
+
+confnav rewrites the file when you change something in the app, so comments you add yourself are not
+kept. The recent list is in `~/.local/state/confnav/recent.json`. `NO_COLOR` is respected.
+
+Version 0.1 kept your folders, hidden entries and renames in `~/.local/share/confnav/library.json`.
+The first start of a newer version moves them into `config.toml` and keeps the old file as
+`library.json.migrated`.
 
 ## Contributing to the catalog
 

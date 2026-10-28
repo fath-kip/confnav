@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -67,6 +69,7 @@ type form struct {
 	note   string
 	isErr  bool
 	submit func(m *Model, vals []string) (tea.Cmd, error)
+	cancel func(m *Model) // optional, after esc
 }
 
 func newForm(title string, submit func(*Model, []string) (tea.Cmd, error), specs ...fieldSpec) *form {
@@ -100,6 +103,9 @@ func (f *form) update(m *Model, msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.closeDialog()
+		if f.cancel != nil {
+			f.cancel(m)
+		}
 		return nil
 	case "up", "shift+tab":
 		f.setFocus(f.focus - 1)
@@ -176,6 +182,7 @@ func (f *form) view(w int) string {
 type confirm struct {
 	title, body string
 	yes         func(m *Model) tea.Cmd
+	no          func(m *Model) tea.Cmd // optional
 }
 
 func (c *confirm) update(m *Model, msg tea.KeyMsg) tea.Cmd {
@@ -185,6 +192,9 @@ func (c *confirm) update(m *Model, msg tea.KeyMsg) tea.Cmd {
 		return c.yes(m)
 	case "n", "N", "esc", "q":
 		m.closeDialog()
+		if c.no != nil {
+			return c.no(m)
+		}
 	}
 	return nil
 }
@@ -205,6 +215,7 @@ const pickerRows = 10
 type picker struct {
 	title    string
 	subtitle string
+	note     string // shown faint below the items
 	items    []string
 	sel      int
 	pick     func(m *Model, i int) tea.Cmd
@@ -255,5 +266,100 @@ func (p *picker) view(w int) string {
 	if end < len(p.items) {
 		body = append(body, sFaint.Render("  ↓ more"))
 	}
+	body = appendNote(body, p.note, inner)
 	return modal(inner, p.title, p.subtitle, body, keyHelp("↑↓", "choose", "enter", "select", "esc", "cancel"))
+}
+
+// appendNote adds an explanatory paragraph under a dialog's body.
+func appendNote(body []string, note string, inner int) []string {
+	if note == "" {
+		return body
+	}
+	return append(body, "", sFaint.Width(inner).Render(note))
+}
+
+// ---- checklist ----
+
+// checklist lets the user tick any number of items.
+type checklist struct {
+	title    string
+	subtitle string
+	note     string
+	items    []string
+	checked  []bool
+	sel      int
+	done     func(m *Model, checked []bool) tea.Cmd
+	cancel   func(m *Model)
+}
+
+const checklistRows = 14
+
+func (c *checklist) update(m *Model, msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "up", "k":
+		c.sel = max(0, c.sel-1)
+	case "down", "j":
+		c.sel = min(len(c.items)-1, c.sel+1)
+	case "home", "g":
+		c.sel = 0
+	case "end", "G":
+		c.sel = len(c.items) - 1
+	case " ", "x":
+		c.checked[c.sel] = !c.checked[c.sel]
+	case "a":
+		all := !slices.Contains(c.checked, false)
+		for i := range c.checked {
+			c.checked[i] = !all
+		}
+	case "enter":
+		m.closeDialog()
+		return c.done(m, c.checked)
+	case "esc", "q":
+		m.closeDialog()
+		if c.cancel != nil {
+			c.cancel(m)
+		}
+	}
+	return nil
+}
+
+func (c *checklist) view(w int) string {
+	content := width(c.subtitle) / 2
+	for _, it := range c.items {
+		content = max(content, width(it)+8)
+	}
+	inner := modalInner(w, content)
+	start := max(0, min(c.sel-checklistRows/2, len(c.items)-checklistRows))
+	end := min(len(c.items), start+checklistRows)
+	var body []string
+	if start > 0 {
+		body = append(body, sFaint.Render("  ↑ more"))
+	}
+	for i := start; i < end; i++ {
+		box := "[ ] "
+		if c.checked[i] {
+			box = "[x] "
+		}
+		line := truncEnd(box+c.items[i], inner-2)
+		if i == c.sel {
+			body = append(body, sPicked.Width(inner).Render("› "+line))
+		} else if c.checked[i] {
+			body = append(body, "  "+line)
+		} else {
+			body = append(body, "  "+sFaint.Render(line))
+		}
+	}
+	if end < len(c.items) {
+		body = append(body, sFaint.Render("  ↓ more"))
+	}
+	n := 0
+	for _, ch := range c.checked {
+		if ch {
+			n++
+		}
+	}
+	body = append(body, "", sFaint.Render(fmt.Sprintf("%d of %d selected", n, len(c.items))))
+	body = appendNote(body, c.note, inner)
+	return modal(inner, c.title, c.subtitle, body,
+		keyHelp("space", "tick", "a", "all/none", "enter", "next", "esc", "cancel"))
 }

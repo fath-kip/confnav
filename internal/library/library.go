@@ -1,13 +1,10 @@
-// Package library stores what the user changed on top of the built-in
-// catalog: their own folders and entries, hidden built-ins and renames.
-//
-// The catalog itself is never copied into the library, so catalog updates in
-// new releases reach users automatically.
+// Package library reads library.json, where versions before
+// [category_structure] kept what the user changed on top of the built-in
+// catalog: their own folders and entries, hidden built-ins and renames. It
+// is only used to move that into config.toml once.
 package library
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +14,12 @@ import (
 	"slices"
 
 	"github.com/fath-kip/confnav/internal/catalog"
+	"github.com/fath-kip/confnav/internal/config"
+	"github.com/fath-kip/confnav/internal/distro"
+	"github.com/fath-kip/confnav/internal/fsinfo"
 	"github.com/fath-kip/confnav/internal/kind"
 	"github.com/fath-kip/confnav/internal/xdg"
 )
-
-// Root is the container ID for the top level of the tree.
-const Root = ""
 
 // Node is a user folder or entry.
 type Node struct {
@@ -50,7 +47,7 @@ type Extra struct {
 type Library struct {
 	Version int `json:"version"`
 	// Folders are the user's top-level nodes: folders, and files or
-	// directories added at the top level. The JSON name predates the latter.
+	// directories added at the top level.
 	Folders []*Node `json:"folders"`
 	// Extras are user nodes added inside built-in categories.
 	Extras []Extra `json:"extras,omitempty"`
@@ -58,29 +55,19 @@ type Library struct {
 	Hidden []string `json:"hidden,omitempty"`
 	// Overrides holds user renames of built-in categories and entries.
 	Overrides map[string]Override `json:"overrides,omitempty"`
-
-	path string
 }
 
 // Path returns the location of library.json.
 func Path() string { return filepath.Join(xdg.DataDir(), "library.json") }
 
-// New returns the library a first-time user starts with.
-func New(path string) *Library {
-	return &Library{
-		Version: 1,
-		Folders: []*Node{{ID: NewID(), Kind: kind.Folder, Name: "My Configs"}},
-		path:    path,
-	}
-}
+// MigratedPath is where library.json is kept after moving into config.toml.
+func MigratedPath() string { return Path() + ".migrated" }
 
-// Load reads library.json, or returns New(path) if it does not exist. A
-// corrupt file is an error rather than silently replaced, so the user's
-// data is never overwritten.
+// Load reads library.json. A missing file returns nil without an error.
 func Load(path string) (*Library, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return New(path), nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
@@ -89,162 +76,88 @@ func Load(path string) (*Library, error) {
 	if err := json.Unmarshal(data, l); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	l.path = path
 	return l, nil
 }
 
-// Save writes the library atomically.
-func (l *Library) Save() error {
-	data, err := json.MarshalIndent(l, "", "  ")
-	if err != nil {
-		return err
+// Migrate turns the library and the catalog it was layered on into a
+// structure for config.toml that shows the same tree: the user's top-level
+// folders first, then the catalog categories that were not hidden, with
+// renames applied and the user's extras inside them.
+func Migrate(l *Library, c *catalog.Catalog, f distro.Family) config.Structure {
+	known := map[string]*config.Entry{} // expanded path → catalog entry, for hints
+	var cats []*config.Folder
+	for _, cat := range c.Categories {
+		cid := catalog.CategoryID(cat.ID)
+		folder := &config.Folder{Catalog: cat.ID, Name: cat.Name}
+		if o, ok := l.Overrides[cid]; ok && o.Name != "" {
+			folder.Name = o.Name
+		}
+		for _, e := range cat.Entries {
+			if !e.For(f) {
+				continue
+			}
+			ce := &config.Entry{Name: e.Name, Desc: e.Desc, Path: e.Path, Kind: e.Kind,
+				Hint: e.HintFor(f), Defaults: e.Defaults}
+			if _, ok := known[fsinfo.Expand(e.Path)]; !ok {
+				known[fsinfo.Expand(e.Path)] = ce.Clone() // before renames, as the tree showed it
+			}
+			id := catalog.EntryID(cat.ID, e.Path)
+			if slices.Contains(l.Hidden, id) {
+				continue
+			}
+			if o, ok := l.Overrides[id]; ok {
+				if o.Name != "" {
+					ce.Name = o.Name
+				}
+				if o.Desc != "" {
+					ce.Desc = o.Desc
+				}
+			}
+			folder.Entries = append(folder.Entries, ce)
+		}
+		if !slices.Contains(l.Hidden, cid) {
+			cats = append(cats, folder)
+		}
 	}
-	return xdg.WriteFileAtomic(l.path, append(data, '\n'), 0o644)
-}
 
-// NewID returns a random ID for a user node.
-func NewID() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return "u:" + hex.EncodeToString(b)
-}
-
-// IsHidden reports whether a built-in ID was hidden.
-func (l *Library) IsHidden(id string) bool { return slices.Contains(l.Hidden, id) }
-
-// Hide hides a built-in category or entry.
-func (l *Library) Hide(id string) {
-	if !l.IsHidden(id) {
-		l.Hidden = append(l.Hidden, id)
-	}
-}
-
-// RestoreHidden un-hides every built-in item and returns how many there were.
-func (l *Library) RestoreHidden() int {
-	n := len(l.Hidden)
-	l.Hidden = nil
-	return n
-}
-
-// SetOverride renames a built-in item. Empty fields keep the built-in text.
-func (l *Library) SetOverride(id, name, desc string) {
-	if l.Overrides == nil {
-		l.Overrides = map[string]Override{}
-	}
-	if name == "" && desc == "" {
-		delete(l.Overrides, id)
-		return
-	}
-	l.Overrides[id] = Override{Name: name, Desc: desc}
-}
-
-// Find returns the user node with the given ID.
-func (l *Library) Find(id string) *Node {
-	n, _, _ := l.locate(id)
-	return n
-}
-
-// Insert adds n to a container: Root, a built-in category ID or a user folder ID.
-func (l *Library) Insert(container string, n *Node) error {
-	switch {
-	case container == Root:
-		l.Folders = append(l.Folders, n)
-	case isCategory(container):
-		for i := range l.Extras {
-			if l.Extras[i].Category == container {
-				l.Extras[i].Nodes = append(l.Extras[i].Nodes, n)
-				return nil
+	var s config.Structure
+	// convert adds n to into (nil: the top level).
+	var convert func(n *Node, into *config.Folder)
+	convert = func(n *Node, into *config.Folder) {
+		if n.Kind == kind.Folder {
+			sub := &config.Folder{Name: n.Name}
+			for _, ch := range n.Children {
+				convert(ch, sub)
+			}
+			s.AddFolder(into, sub)
+			return
+		}
+		e := &config.Entry{Name: n.Name, Desc: n.Desc, Path: n.Path, Kind: n.Kind}
+		if e.Kind == "" {
+			e.Kind = kind.File
+		}
+		if k, ok := known[fsinfo.Expand(n.Path)]; ok {
+			e.Hint, e.Defaults = k.Hint, k.Defaults
+			if e.Desc == "" {
+				e.Desc = k.Desc
 			}
 		}
-		l.Extras = append(l.Extras, Extra{Category: container, Nodes: []*Node{n}})
-	default:
-		parent := l.Find(container)
-		if parent == nil || parent.Kind != kind.Folder {
-			return fmt.Errorf("folder %q not found", container)
+		s.AddEntry(into, e)
+	}
+	for _, n := range l.Folders {
+		convert(n, nil)
+	}
+	for _, folder := range cats {
+		for _, ex := range l.Extras {
+			if ex.Category == catalog.CategoryID(folder.Catalog) {
+				for _, n := range ex.Nodes {
+					convert(n, folder)
+				}
+			}
 		}
-		parent.Children = append(parent.Children, n)
-	}
-	return nil
-}
-
-// Remove deletes a user node and everything below it.
-func (l *Library) Remove(id string) bool {
-	_, list, i := l.locate(id)
-	if list == nil {
-		return false
-	}
-	*list = slices.Delete(*list, i, i+1)
-	return true
-}
-
-// Move puts a user node into another container.
-func (l *Library) Move(id, container string) error {
-	n, list, i := l.locate(id)
-	if n == nil {
-		return fmt.Errorf("entry %q not found", id)
-	}
-	if container == id || (n.Kind == kind.Folder && contains(n, container)) {
-		return errors.New("cannot move a folder into itself")
-	}
-	*list = slices.Delete(*list, i, i+1)
-	return l.Insert(container, n)
-}
-
-// Clone deep-copies a node with fresh IDs.
-func Clone(n *Node) *Node {
-	c := *n
-	c.ID = NewID()
-	c.Children = nil
-	for _, ch := range n.Children {
-		c.Children = append(c.Children, Clone(ch))
-	}
-	return &c
-}
-
-// locate finds a node and the slice holding it.
-func (l *Library) locate(id string) (*Node, *[]*Node, int) {
-	if n, list, i := find(&l.Folders, id); n != nil {
-		return n, list, i
-	}
-	for e := range l.Extras {
-		if n, list, i := find(&l.Extras[e].Nodes, id); n != nil {
-			return n, list, i
+		if len(folder.Entries) > 0 || len(folder.Folders) > 0 {
+			s.Categories = append(s.Categories, folder)
 		}
 	}
-	return nil, nil, -1
-}
-
-// ExtrasFor returns the user nodes added to a built-in category.
-func (l *Library) ExtrasFor(category string) []*Node {
-	for _, e := range l.Extras {
-		if e.Category == category {
-			return e.Nodes
-		}
-	}
-	return nil
-}
-
-func find(list *[]*Node, id string) (*Node, *[]*Node, int) {
-	for i, n := range *list {
-		if n.ID == id {
-			return n, list, i
-		}
-		if n, l, j := find(&n.Children, id); n != nil {
-			return n, l, j
-		}
-	}
-	return nil, nil, -1
-}
-
-func contains(folder *Node, id string) bool {
-	for _, c := range folder.Children {
-		if c.ID == id || contains(c, id) {
-			return true
-		}
-	}
-	return false
-}
-
-func isCategory(container string) bool {
-	return len(container) > 4 && container[:4] == catalog.CategoryID("")
+	return s
 }

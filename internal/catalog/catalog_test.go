@@ -75,3 +75,50 @@ func TestEntryHelpers(t *testing.T) {
 		t.Error("entry without distros must apply to unknown distros")
 	}
 }
+
+func TestSeed(t *testing.T) {
+	c, err := Parse([]byte(`
+[[category]]
+id = "boot"
+name = "Boot"
+  [[category.entry]]
+  name = "grub"
+  desc = "d"
+  path = "/etc/default/grub"
+  hint = "sudo grub-mkconfig -o /boot/grub/grub.cfg"
+  hints = { debian = "sudo update-grub" }
+  [[category.entry]]
+  name = "dracut"
+  desc = "d"
+  path = "/etc/dracut.conf"
+  distros = ["fedora"]
+[[category]]
+id = "apt"
+name = "Apt"
+  [[category.entry]]
+  name = "sources"
+  desc = "d"
+  path = "/etc/apt/sources.list"
+  distros = ["debian"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Seed(distro.Debian, nil)
+	if len(got) != 2 || got[0].Catalog != "boot" || len(got[0].Entries) != 1 || got[0].Entries[0].Hint != "sudo update-grub" {
+		t.Fatalf("Seed(debian) = %+v", got)
+	}
+	if got := c.Seed(distro.Arch, nil); len(got) != 1 {
+		t.Errorf("a category with nothing for arch must be left out: %+v", got)
+	}
+	if got := c.Seed(distro.Fedora, []string{"boot"}); len(got) != 1 || len(got[0].Entries) != 2 {
+		t.Errorf("Seed(fedora, boot) = %+v", got)
+	}
+	s := c.DefaultStructure(distro.Arch)
+	if s.Categories[0].Name != MyConfigs || s.Categories[0].Catalog != "" || len(s.Categories) != 2 {
+		t.Errorf("DefaultStructure = %+v", s.Categories)
+	}
+	if n := c.Category("boot").Count(distro.Fedora); n != 2 {
+		t.Errorf("Count = %d", n)
+	}
+}

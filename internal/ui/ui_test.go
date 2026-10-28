@@ -16,8 +16,8 @@ import (
 	"github.com/fath-kip/confnav/internal/distro"
 	"github.com/fath-kip/confnav/internal/fsinfo"
 	"github.com/fath-kip/confnav/internal/kind"
-	"github.com/fath-kip/confnav/internal/library"
 	"github.com/fath-kip/confnav/internal/recent"
+	"github.com/fath-kip/confnav/internal/scan"
 	"github.com/fath-kip/confnav/internal/tree"
 )
 
@@ -84,10 +84,13 @@ name = "Systemd"
 	}
 	cfg := config.Default()
 	cfg.Editor = "true" // a command that exists and does nothing
+	if !firstRun {
+		cfg.Structure = cat.DefaultStructure(distro.Arch)
+	}
 	m := New(Options{
 		Catalog: cat, Distro: distro.Info{Name: "Test Linux", Family: distro.Arch}, Family: distro.Arch,
 		Config: cfg, ConfigPath: config.Path(), FirstRun: firstRun,
-		Library: library.New(library.Path()), Recent: recent.Load(recent.Path(), 20),
+		Recent: recent.Load(recent.Path(), 20), Version: "1.2.3",
 	})
 	m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	return &env{m: m, etc: etc, home: home}
@@ -223,12 +226,12 @@ func TestNewFolderAndAddEntry(t *testing.T) {
 	e.press("a")
 	e.has(t, "Add to My Configs", "What do you want to add?", "File, directory or glob", "Folder")
 	e.press("down", "enter", "W", "o", "r", "k", "enter")
-	mine := e.m.lib.Folders[0]
-	if len(mine.Children) != 1 || mine.Children[0].Name != "Work" {
-		t.Fatalf("folder not created: %+v", mine.Children)
+	mine := e.m.cfg.Structure.Categories[0]
+	if len(mine.Folders) != 1 || mine.Folders[0].Name != "Work" {
+		t.Fatalf("folder not created: %+v", mine.Folders)
 	}
-	if _, err := os.Stat(library.Path()); err != nil {
-		t.Fatal("library was not saved")
+	if cfg, _, _ := config.Load(config.Path()); len(cfg.Structure.Categories[0].Folders) != 1 {
+		t.Fatal("the new folder was not saved to config.toml")
 	}
 
 	// Add to the new folder, using Tab completion for the path.
@@ -237,10 +240,10 @@ func TestNewFolderAndAddEntry(t *testing.T) {
 	e.press("tab")
 	e.has(t, e.etc+"/hosts")
 	e.press("enter", "enter", "M", "i", "n", "e", "enter")
-	work := mine.Children[0]
-	if len(work.Children) != 1 || work.Children[0].Name != "hosts" || work.Children[0].Desc != "Mine" ||
-		work.Children[0].Kind != kind.File {
-		t.Fatalf("entry not added: %+v", work.Children)
+	work := mine.Folders[0]
+	if len(work.Entries) != 1 || work.Entries[0].Name != "hosts" || work.Entries[0].Desc != "Mine" ||
+		work.Entries[0].Kind != kind.File {
+		t.Fatalf("entry not added: %+v", work.Entries)
 	}
 	e.has(t, "Added hosts")
 
@@ -248,8 +251,8 @@ func TestNewFolderAndAddEntry(t *testing.T) {
 	e.press("a", "enter")
 	e.press(strings.Split(e.etc+"/sysctl.d/", "")...)
 	e.press("enter", "enter", "enter")
-	if k := work.Children[1].Kind; k != kind.Dir || work.Children[1].Path != e.etc+"/sysctl.d" {
-		t.Errorf("directory entry = %+v", work.Children[1])
+	if k := work.Entries[1].Kind; k != kind.Dir || work.Entries[1].Path != e.etc+"/sysctl.d" {
+		t.Errorf("directory entry = %+v", work.Entries[1])
 	}
 }
 
@@ -262,25 +265,31 @@ func TestAddValidatesPath(t *testing.T) {
 	}
 	e.has(t, "must be absolute")
 	e.press("esc")
-	if e.m.mode != modeNormal || len(e.m.lib.Extras) != 0 {
+	if e.m.mode != modeNormal || len(e.m.cfg.Structure.Category("dns").Entries) != 2 {
 		t.Error("esc should cancel without changes")
 	}
 }
 
-func TestHideAndRestoreBuiltin(t *testing.T) {
+func TestRemoveCatalogEntry(t *testing.T) {
 	e := setup(t, false)
 	e.goTo(t, "DNS")
 	e.press("enter")
 	e.goTo(t, "hosts")
 	e.press("d")
-	e.has(t, "Hide the built-in entry hosts?")
+	e.has(t, "Remove hosts?", "file on disk is not touched")
 	e.press("y")
-	if !e.m.lib.IsHidden("dns:" + e.etc + "/hosts") {
-		t.Fatal("entry not hidden")
+	e.has(t, "▾ DNS (1)", "Removed hosts")
+	if _, err := os.Stat(e.etc + "/hosts"); err != nil {
+		t.Fatal("the file on disk was touched")
 	}
-	e.has(t, "▾ DNS (1)")
-	e.press("R", "y")
-	e.has(t, "▾ DNS (2)", "Restored 1")
+	if len(e.m.cfg.Structure.Ignore) != 0 {
+		t.Error("only entries found by a scan go to the ignore list")
+	}
+
+	// Removing a built-in category points at the preferences to get it back.
+	e.goTo(t, "DNS")
+	e.press("d")
+	e.has(t, "Remove DNS?", "preferences (shift+p)")
 }
 
 func TestCopyBuiltinToMyConfigs(t *testing.T) {
@@ -291,9 +300,12 @@ func TestCopyBuiltinToMyConfigs(t *testing.T) {
 	e.press("c")
 	e.has(t, "Copy hosts to", "My Configs")
 	e.press("enter") // My Configs is the first destination
-	mine := e.m.lib.Folders[0]
-	if len(mine.Children) != 1 || mine.Children[0].Path != e.etc+"/hosts" {
-		t.Fatalf("copy failed: %+v", mine.Children)
+	mine := e.m.cfg.Structure.Categories[0]
+	if len(mine.Entries) != 1 || mine.Entries[0].Path != e.etc+"/hosts" || mine.Entries[0].Hint != "nothing to reload" {
+		t.Fatalf("copy failed: %+v", mine.Entries)
+	}
+	if len(e.m.cfg.Structure.Category("dns").Entries) != 2 {
+		t.Error("copying must keep the original")
 	}
 	// The copy keeps the catalog hint.
 	e.goTo(t, "My Configs")
@@ -366,11 +378,141 @@ func TestFirstRunAsksForEditor(t *testing.T) {
 	if e.m.mode != modeDialog {
 		t.Fatal("first run should open the editor picker")
 	}
-	e.has(t, "Welcome to confnav!")
+	e.has(t, "Welcome to confnav! · 1/4")
 	e.press("esc")
-	if _, err := os.Stat(config.Path()); err != nil {
-		t.Error("cancelling the first-run picker should still write the config")
+	cfg, _, err := config.Load(config.Path())
+	if err != nil {
+		t.Fatal("cancelling the first-run preferences should still write the config")
 	}
+	if got := len(cfg.Structure.Categories); got != 4 || cfg.Structure.Categories[0].Name != "My Configs" {
+		t.Errorf("cancelling should keep the defaults: %d categories", got)
+	}
+	e.has(t, "▸ DNS (2)")
+}
+
+func TestFirstRunPreferences(t *testing.T) {
+	e := setup(t, true)
+	e.press("G", "enter") // Custom command…, whatever editors this machine has
+	e.press("esc")        // leaving the form keeps going with defaults on the first run
+	if e.m.mode == modeDialog {
+		t.Fatal("esc in the custom form should end the first-run questions")
+	}
+
+	e = setup(t, true)
+	e.press("G", "enter")
+	for range len("true") {
+		e.press("backspace")
+	}
+	e.press("n", "a", "n", "o", "enter")
+	e.has(t, "Welcome to confnav! · 2/4", "Which categories do you want in the list?",
+		"[x] DNS (2 files)", "[x] Kernel (1 files)", "3 of 3 selected", "your own and change their files", "[category_structure]")
+	e.press(" ") // untick DNS
+	e.has(t, "[ ] DNS (2 files)", "2 of 3 selected")
+	e.press("enter")
+	e.has(t, "3/4", "Show files that don't exist on this system?", "Missing files are", "shift+m")
+	e.press("down", "enter")
+	e.has(t, "4/4", "Look for more configuration files", "Scan as root (sudo asks for your password)", "Don't scan now")
+	e.press("G", "enter")
+	if e.m.mode != modeNormal {
+		t.Fatalf("the last answer should close the preferences:\n%s", e.screen())
+	}
+	cfg, _, err := config.Load(config.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range cfg.Structure.Categories {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "My Configs,Kernel,Systemd" || cfg.Editor != "nano" || cfg.ShowMissing || cfg.ScanAs != "" {
+		t.Errorf("saved %v editor=%q show_missing=%v scan_as=%q", names, cfg.Editor, cfg.ShowMissing, cfg.ScanAs)
+	}
+	e.has(t, "Preferences saved")
+	e.lacks(t, "DNS")
+}
+
+// walkPrefs answers the editor question with the current editor and ticks
+// nothing else, ending on the scan question.
+func (e *env) prefsToCategories(t *testing.T) {
+	t.Helper()
+	e.press("P")
+	e.has(t, "Preferences · 1/4")
+	e.press("G", "enter", "enter") // custom command, keeping the current one
+	e.has(t, "Preferences · 2/4")
+}
+
+func TestPreferencesRemoveAndAddCategories(t *testing.T) {
+	e := setup(t, false)
+	e.prefsToCategories(t)
+	e.press(" ", "enter", "enter", "enter") // untick DNS; keep missing files; don't scan
+	e.has(t, "Remove the category DNS?", "2 entries")
+	e.press("n")
+	if e.m.cfg.Structure.Category("dns") == nil {
+		t.Fatal("n must keep the category")
+	}
+	e.has(t, "Preferences saved")
+
+	e.prefsToCategories(t)
+	e.press(" ", "enter", "enter", "enter", "y")
+	if e.m.cfg.Structure.Category("dns") != nil {
+		t.Fatal("y must remove the category")
+	}
+	e.lacks(t, "DNS (")
+
+	e.prefsToCategories(t)
+	e.has(t, "[ ] DNS")
+	e.press(" ", "enter", "enter", "enter")
+	if dns := e.m.cfg.Structure.Category("dns"); dns == nil || len(dns.Entries) != 2 {
+		t.Fatal("ticking a category again should add it from the catalog")
+	}
+
+	// esc later on changes nothing.
+	e.prefsToCategories(t)
+	e.press(" ", "esc")
+	if e.m.cfg.Structure.Category("dns") == nil || e.m.mode != modeNormal {
+		t.Error("esc must cancel the preferences without changes")
+	}
+	e.has(t, "Preferences unchanged")
+}
+
+func TestScanAddsFoundFiles(t *testing.T) {
+	e := setup(t, false)
+	e.m.runScan = func(r scan.Roots) []scan.Found {
+		return []scan.Found{
+			{Path: e.etc + "/hosts", Category: "dns"}, // already listed
+			{Path: e.etc + "/host.conf", Category: "dns"},
+			{Path: e.etc + "/foo/foo.conf", Category: scan.Other, Folder: "foo", Group: e.etc + "/foo"},
+			{Path: e.etc + "/pacman.conf", Category: "packages"}, // not in the list
+		}
+	}
+	e.press("F")
+	e.has(t, "How should confnav scan?", "Scan as root")
+	cmd := e.press("enter")
+	if e.m.cfg.ScanAs != config.ScanUser || cmd == nil {
+		t.Fatalf("scan_as = %q, cmd = %v", e.m.cfg.ScanAs, cmd)
+	}
+	e.has(t, "scanning…")
+	if again := e.press("F"); again != nil {
+		t.Error("a second scan must not start while one runs")
+	}
+	e.m.Update(cmd())
+	e.has(t, "Scan added 2 file(s) (1 already listed, 1 skipped: their category is not in your list)", "▸ Other (1)")
+	e.lacks(t, "scanning…")
+	dns := e.m.cfg.Structure.Category("dns")
+	if len(dns.Entries) != 3 || !dns.Entries[2].Scanned || dns.Entries[2].Name != "host.conf" {
+		t.Fatalf("DNS = %+v", dns.Entries)
+	}
+
+	// A removed scan result stays away.
+	e.goTo(t, "DNS")
+	e.press("enter")
+	e.goTo(t, "host.conf")
+	e.has(t, "found by scan")
+	e.press("d")
+	e.has(t, "A new scan won't add it again")
+	e.press("y")
+	e.m.Update(e.press("F")())
+	e.has(t, "Scan added 0 file(s) (3 already listed, 1 skipped")
 }
 
 func TestRemoveUserFolder(t *testing.T) {
@@ -379,11 +521,11 @@ func TestRemoveUserFolder(t *testing.T) {
 	e.press("d")
 	e.has(t, "Remove My Configs?", "file on disk is not touched")
 	e.press("n")
-	if len(e.m.lib.Folders) != 1 {
+	if e.m.cfg.Structure.Categories[0].Name != "My Configs" {
 		t.Fatal("n must keep the folder")
 	}
 	e.press("d", "y")
-	if len(e.m.lib.Folders) != 0 {
+	if e.m.cfg.Structure.Categories[0].Name == "My Configs" {
 		t.Error("folder not removed")
 	}
 	e.lacks(t, "★ My Configs")
@@ -419,10 +561,31 @@ func TestBatchedRunesAreSeparateKeys(t *testing.T) {
 func TestHelp(t *testing.T) {
 	e := setup(t, false)
 	e.press("?")
-	e.has(t, "Keys", "sudoedit", "never deletes")
+	e.has(t, "Help · confnav 1.2.3", "╭", "Move", "Organise", "sudoedit", "esc close help")
+	e.lacks(t, "NAME", "Files you opened recently")
+	e.press("G")
+	e.has(t, "never deletes", "Mouse", "double-click")
 	e.press("x")
 	if e.m.mode != modeNormal {
-		t.Error("any key should close help")
+		t.Error("a key that does not scroll should close help")
+	}
+}
+
+func TestHelpScrolls(t *testing.T) {
+	e := setup(t, false)
+	e.m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	e.press("?")
+	e.has(t, "↓ more below", "Move")
+	e.press("G")
+	e.lacks(t, "↓ more below")
+	e.has(t, "never deletes")
+	for _, l := range strings.Split(e.screen(), "\n") {
+		if width(l) > 80 {
+			t.Errorf("help line wider than the terminal: %q", l)
+		}
+	}
+	if cmd := e.press("q"); cmd != nil || e.m.mode != modeNormal {
+		t.Error("q should close help, not quit")
 	}
 }
 
@@ -459,10 +622,10 @@ func TestFirstRunModalIsCentredAndProminent(t *testing.T) {
 
 func TestKeysLineUsesShiftNames(t *testing.T) {
 	e := setup(t, false)
-	e.has(t, "shift+e editor", "shift+m hide missing", "a add")
+	e.has(t, "shift+s settings", "shift+p prefs", "shift+m hide missing", "a add")
 	e.lacks(t, " n folder")
 	e.press("?")
-	e.has(t, "shift+r restore hidden built-ins", "↑/k up", "config.toml")
+	e.has(t, "shift+f    scan the system", "↑/k", "move up", "config.toml")
 }
 
 func TestPlusRowAddsAtTopLevel(t *testing.T) {
@@ -477,9 +640,9 @@ func TestPlusRowAddsAtTopLevel(t *testing.T) {
 	e.press("enter")
 	e.press(strings.Split(e.etc+"/hosts", "")...)
 	e.press("enter", "enter", "enter")
-	last := e.m.lib.Folders[len(e.m.lib.Folders)-1]
-	if last.Kind != kind.File || last.Path != e.etc+"/hosts" {
-		t.Fatalf("top-level file not added: %+v", last)
+	top := e.m.cfg.Structure.Entries
+	if len(top) != 1 || top[0].Kind != kind.File || top[0].Path != e.etc+"/hosts" {
+		t.Fatalf("top-level file not added: %+v", top)
 	}
 	e.has(t, "\n  hosts ")
 
@@ -493,9 +656,9 @@ func TestAddFolderInsideCategory(t *testing.T) {
 	e := setup(t, false)
 	e.goTo(t, "DNS")
 	e.press("a", "down", "enter", "V", "P", "N", "enter")
-	extras := e.m.lib.ExtrasFor("cat:dns")
-	if len(extras) != 1 || extras[0].Kind != kind.Folder || extras[0].Name != "VPN" {
-		t.Fatalf("folder not added to DNS: %+v", extras)
+	dns := e.m.cfg.Structure.Category("dns")
+	if len(dns.Folders) != 1 || dns.Folders[0].Name != "VPN" {
+		t.Fatalf("folder not added to DNS: %+v", dns.Folders)
 	}
 	e.has(t, "▾ DNS (3)", "  ▸ ★ VPN (0)")
 }

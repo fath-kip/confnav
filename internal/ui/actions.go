@@ -16,7 +16,6 @@ import (
 	"github.com/fath-kip/confnav/internal/editor"
 	"github.com/fath-kip/confnav/internal/fsinfo"
 	"github.com/fath-kip/confnav/internal/kind"
-	"github.com/fath-kip/confnav/internal/library"
 	"github.com/fath-kip/confnav/internal/tree"
 	"github.com/fath-kip/confnav/internal/xdg"
 )
@@ -228,67 +227,55 @@ func (m *Model) openWith(n *tree.Node) {
 	})
 }
 
-// chooseEditor sets the default editor. On first run, cancelling still
-// writes the config so the question is not asked again.
-func (m *Model) chooseEditor(firstRun bool) {
+// editorPicker asks which editor opens files and passes the answer to done.
+func (m *Model) editorPicker(title, subtitle, note string, done func(m *Model, ed string) tea.Cmd, cancel func(m *Model)) {
 	current := editor.Resolve(m.cfg.Editor)
 	items := editor.Detect()
 	sel := 0
-	for i, e := range items {
-		if e == current {
-			sel = i
-		}
-	}
 	labels := make([]string, len(items))
 	for i, e := range items {
 		labels[i] = e
 		if e == current {
+			sel = i
 			labels[i] += "  (current)"
 		}
 	}
 	labels = append(labels, "Custom command…")
-	title, subtitle := "Default editor", "Which editor should open your files?"
-	if firstRun {
-		title = "Welcome to confnav!"
-		subtitle = "Which editor should open your files? You can change it later with " +
-			m.keys.label("editor") + "."
-	}
-	set := func(m *Model, ed string) {
-		m.cfg.Editor = ed
-		if err := config.Save(m.opt.ConfigPath, m.cfg); err != nil {
-			m.fail("Could not save config: " + err.Error())
-			return
-		}
-		m.setStatus(sOK, "Files now open with "+ed+" (change with "+m.keys.label("editor")+")")
-	}
 	m.openDialog(&picker{
 		title:    title,
 		subtitle: subtitle,
+		note:     note,
 		items:    labels,
 		sel:      sel,
 		pick: func(m *Model, i int) tea.Cmd {
 			if i < len(items) {
-				set(m, items[i])
-				return nil
+				return done(m, items[i])
 			}
-			m.openDialog(newForm("Default editor", func(m *Model, v []string) (tea.Cmd, error) {
+			f := newForm(title, func(m *Model, v []string) (tea.Cmd, error) {
 				if v[0] == "" {
 					return nil, errors.New("enter a command")
 				}
-				set(m, v[0])
-				return nil, nil
-			}, fieldSpec{label: "Command", value: m.cfg.Editor, placeholder: "e.g. nvim -p"}))
+				return done(m, v[0]), nil
+			}, fieldSpec{label: "Command", value: m.cfg.Editor, placeholder: "e.g. nvim -p"})
+			f.cancel = cancel
+			m.openDialog(f)
 			return nil
 		},
-		cancel: func(m *Model) {
-			if !firstRun {
-				return
-			}
-			if err := config.Save(m.opt.ConfigPath, m.cfg); err != nil {
-				m.fail("Could not save config: " + err.Error())
-			}
-		},
+		cancel: cancel,
 	})
+}
+
+// chooseEditor sets the default editor.
+func (m *Model) chooseEditor() {
+	m.editorPicker("Default editor", "Which editor should open your files?", "", func(m *Model, ed string) tea.Cmd {
+		m.cfg.Editor = ed
+		if err := config.Save(m.opt.ConfigPath, m.cfg); err != nil {
+			m.fail("Could not save config: " + err.Error())
+			return nil
+		}
+		m.setStatus(sOK, "Files now open with "+ed+" (change with "+m.keys.label("editor")+")")
+		return nil
+	}, nil)
 }
 
 // openSettings opens confnav's own config.toml; saving it applies the
@@ -301,11 +288,9 @@ func (m *Model) openSettings() tea.Cmd {
 
 // ---- organising ----
 
-// target says where new nodes go: a library container and its tree node
-// (nil for the top level).
+// target says where new nodes go: a folder of the tree, or nil for the top level.
 type target struct {
-	container string
-	folder    *tree.Node
+	folder *tree.Node
 }
 
 func (t target) name() string {
@@ -315,17 +300,25 @@ func (t target) name() string {
 	return t.folder.Name
 }
 
+// container is the config folder for t (nil: the top level).
+func (t target) container() *config.Folder {
+	if t.folder == nil {
+		return nil
+	}
+	return t.folder.Folder
+}
+
 // targetFor finds where new nodes go for the selected node: its folder,
 // or the top level for top-level entries, Recent and the + row.
 func targetFor(n *tree.Node) target {
 	if n != nil {
-		if f := n.Folder(); f != nil {
-			if c, ok := f.Container(); ok {
-				return target{c, f}
+		if f := n.FolderNode(); f != nil {
+			if _, ok := f.Container(); ok {
+				return target{f}
 			}
 		}
 	}
-	return target{container: library.Root}
+	return target{}
 }
 
 // addPrompt asks whether to add a file or a folder next to n (nil: top level).
@@ -360,15 +353,13 @@ func (m *Model) addEntry(t target) {
 		if name == "" {
 			name = filepath.Base(full)
 		}
-		node := &library.Node{ID: library.NewID(), Kind: kind.Infer(full), Name: name, Desc: v[2], Path: p}
-		if err := m.lib.Insert(t.container, node); err != nil {
-			return nil, err
-		}
+		e := &config.Entry{Name: name, Desc: v[2], Path: p, Kind: kind.Infer(full)}
+		m.cfg.Structure.AddEntry(t.container(), e)
 		if t.folder != nil {
 			m.expanded[t.folder.ID] = true
 		}
-		m.saveLibrary("Added " + name)
-		m.selectID(node.ID)
+		m.saveConfig("Added " + name)
+		m.selectWhere(func(n *tree.Node) bool { return n.Entry == e })
 		return nil, nil
 	},
 		fieldSpec{label: "Path", placeholder: "/etc/… or ~/…  (a directory or a glob like *.conf works too)", path: true},
@@ -390,15 +381,13 @@ func (m *Model) newFolder(t target) {
 		if v[0] == "" {
 			return nil, errors.New("a name is required")
 		}
-		node := &library.Node{ID: library.NewID(), Kind: kind.Folder, Name: v[0]}
-		if err := m.lib.Insert(t.container, node); err != nil {
-			return nil, err
-		}
+		f := &config.Folder{Name: v[0]}
+		m.cfg.Structure.AddFolder(t.container(), f)
 		if t.folder != nil {
 			m.expanded[t.folder.ID] = true
 		}
-		m.saveLibrary("Created folder " + v[0])
-		m.selectID(node.ID)
+		m.saveConfig("Created folder " + v[0])
+		m.selectWhere(func(n *tree.Node) bool { return n.Folder == f })
 		return nil, nil
 	}, fieldSpec{label: "Name", placeholder: "e.g. Daily"}))
 }
@@ -407,36 +396,23 @@ func (m *Model) editNode(n *tree.Node) {
 	switch {
 	case n == nil:
 		return
-	case n.Origin == tree.Recent || n.Origin == tree.Dynamic:
-		m.fail("Only catalog entries and your own entries can be edited; copy this one to a folder with c")
+	case n.Origin != tree.Config:
+		m.fail("Only entries of your list can be edited; copy this one to a folder with " + m.keys.label("copy"))
 		return
-	case n.Origin == tree.Builtin:
-		m.openDialog(newForm("Rename built-in "+n.Name, func(m *Model, v []string) (tea.Cmd, error) {
-			m.lib.SetOverride(n.ID, v[0], v[1])
-			m.saveLibrary("Updated " + n.Name)
-			return nil, nil
-		},
-			fieldSpec{label: "Name", value: n.Name, placeholder: "empty = built-in name"},
-			fieldSpec{label: "Description", value: n.Desc, placeholder: "empty = built-in description"},
-		))
-		return
-	}
-	u := m.lib.Find(n.ID)
-	if u == nil {
-		return
-	}
-	if u.Kind == kind.Folder {
-		m.openDialog(newForm("Rename folder", func(m *Model, v []string) (tea.Cmd, error) {
+	case n.Folder != nil:
+		f := n.Folder
+		m.openDialog(newForm("Rename "+f.Name, func(m *Model, v []string) (tea.Cmd, error) {
 			if v[0] == "" {
 				return nil, errors.New("a name is required")
 			}
-			u.Name = v[0]
-			m.saveLibrary("Renamed to " + v[0])
+			f.Name = v[0]
+			m.saveConfig("Renamed to " + v[0])
 			return nil, nil
-		}, fieldSpec{label: "Name", value: u.Name}))
+		}, fieldSpec{label: "Name", value: f.Name}))
 		return
 	}
-	m.openDialog(newForm("Edit "+u.Name, func(m *Model, v []string) (tea.Cmd, error) {
+	e := n.Entry
+	m.openDialog(newForm("Edit "+e.Name, func(m *Model, v []string) (tea.Cmd, error) {
 		p := cleanPath(v[0])
 		full := fsinfo.Expand(p)
 		if p == "" || !filepath.IsAbs(full) {
@@ -445,53 +421,51 @@ func (m *Model) editNode(n *tree.Node) {
 		if v[1] == "" {
 			v[1] = filepath.Base(full)
 		}
-		u.Path, u.Name, u.Desc, u.Kind = p, v[1], v[2], kind.Infer(full)
-		m.saveLibrary("Updated " + u.Name)
+		e.Scanned = e.Scanned && p == e.Path
+		e.Path, e.Name, e.Desc, e.Kind = p, v[1], v[2], kind.Infer(full)
+		m.saveConfig("Updated " + e.Name)
 		return nil, nil
 	},
-		fieldSpec{label: "Path", value: u.Path, path: true},
-		fieldSpec{label: "Name", value: u.Name},
-		fieldSpec{label: "Description", value: u.Desc},
+		fieldSpec{label: "Path", value: e.Path, path: true},
+		fieldSpec{label: "Name", value: e.Name},
+		fieldSpec{label: "Description", value: e.Desc},
 	))
 }
 
-// copyOrMove puts n into another folder. Built-in items can't really move,
-// so moving one copies it and hides the original.
+// copyOrMove puts n into another folder. Recent items and files inside a
+// listed directory can only be copied: they become entries of their own.
 func (m *Model) copyOrMove(n *tree.Node, move bool) {
 	if n == nil || n.ID == tree.RecentID {
 		m.fail("Select an entry or folder")
 		return
 	}
+	move = move && n.Origin == tree.Config
 	verb := "Copy"
 	if move {
 		verb = "Move"
 	}
-	type dest struct {
-		container string
-		node      *tree.Node
-	}
-	var dests []dest
+	var dests []*tree.Node // nil: the top level
 	var labels []string
 	var walk func([]*tree.Node)
 	walk = func(nodes []*tree.Node) {
 		for _, f := range nodes {
-			if f.Kind != kind.Folder || (move && f.ID == n.ID) {
+			if f.Kind != kind.Folder || (move && f == n) {
 				continue
 			}
-			if c, ok := f.Container(); ok && f != n.Parent {
+			if _, ok := f.Container(); ok && f != n.Parent {
 				label := f.Name
 				if crumb := f.Crumb(); crumb != "" {
 					label = crumb + " › " + f.Name
 				}
-				dests = append(dests, dest{c, f})
+				dests = append(dests, f)
 				labels = append(labels, label)
 			}
 			walk(f.Children)
 		}
 	}
 	walk(m.roots)
-	if n.Parent != nil || n.Origin != tree.User {
-		dests = append(dests, dest{container: library.Root})
+	if n.Parent != nil {
+		dests = append(dests, nil)
 		labels = append(labels, "(top level)")
 	}
 	if len(dests) == 0 {
@@ -503,53 +477,56 @@ func (m *Model) copyOrMove(n *tree.Node, move bool) {
 		items: labels,
 		pick: func(m *Model, i int) tea.Cmd {
 			d := dests[i]
+			var into *config.Folder
 			where := "the top level"
-			if d.node != nil {
-				where = d.node.Name
-				m.expanded[d.node.ID] = true
+			if d != nil {
+				into, where = d.Folder, d.Name
+				m.expanded[d.ID] = true
 			}
-			if move && n.Origin == tree.User {
-				if err := m.lib.Move(n.ID, d.container); err != nil {
-					m.fail(err.Error())
-					return nil
+			st := &m.cfg.Structure
+			var match func(*tree.Node) bool
+			switch {
+			case n.Folder != nil:
+				f := n.Folder
+				if move {
+					st.RemoveFolder(n.ParentFolder(), f)
+				} else {
+					f = f.Clone()
 				}
-				m.saveLibrary("Moved " + n.Name + " to " + where)
-				return nil
+				if into != nil {
+					f.Catalog = "" // only top-level categories stand for a catalog topic
+				}
+				st.AddFolder(into, f)
+				match = func(t *tree.Node) bool { return t.Folder == f }
+			case n.Entry != nil:
+				e := n.Entry
+				if move {
+					st.RemoveEntry(n.ParentFolder(), e)
+				} else {
+					e = e.Clone()
+					e.Scanned = false
+				}
+				st.AddEntry(into, e)
+				match = func(t *tree.Node) bool { return t.Entry == e }
+			default:
+				e := &config.Entry{Name: n.Name, Desc: n.Desc, Path: fsinfo.Abbrev(n.FullPath()),
+					Kind: n.Kind, Hint: n.Hint, Defaults: n.Defaults}
+				st.AddEntry(into, e)
+				match = func(t *tree.Node) bool { return t.Entry == e }
 			}
-			c := m.toLibrary(n)
-			if err := m.lib.Insert(d.container, c); err != nil {
-				m.fail(err.Error())
-				return nil
+			done := "Copied "
+			if move {
+				done = "Moved "
 			}
-			msg := "Copied " + n.Name + " to " + where
-			if move && n.Origin == tree.Builtin {
-				m.lib.Hide(n.ID)
-				msg = "Moved " + n.Name + " to " + where + " (the built-in original is hidden; R restores it)"
-			}
-			m.saveLibrary(msg)
-			m.selectID(c.ID)
+			m.saveConfig(done + n.Name + " to " + where)
+			m.selectWhere(match)
 			return nil
 		},
 	})
 }
 
-// toLibrary converts a tree node into a new library node.
-func (m *Model) toLibrary(n *tree.Node) *library.Node {
-	if n.Origin == tree.User {
-		if u := m.lib.Find(n.ID); u != nil {
-			return library.Clone(u)
-		}
-	}
-	ln := &library.Node{ID: library.NewID(), Kind: n.Kind, Name: n.Name, Desc: n.Desc, Path: n.Path}
-	if n.Kind == kind.Folder {
-		for _, c := range n.Children {
-			ln.Children = append(ln.Children, m.toLibrary(c))
-		}
-	}
-	return ln
-}
-
 func (m *Model) remove(n *tree.Node) {
+	st := &m.cfg.Structure
 	switch {
 	case n == nil:
 	case n.ID == tree.RecentID:
@@ -563,47 +540,36 @@ func (m *Model) remove(n *tree.Node) {
 		m.saveRecent("Removed " + n.Name + " from Recent")
 	case n.Origin == tree.Dynamic:
 		m.fail("This is a file on disk; confnav never deletes files. Remove the entry above it instead")
-	case n.Origin == tree.Builtin:
-		what := "entry"
-		if n.Kind == kind.Folder {
-			what = "category"
-		}
-		m.openDialog(&confirm{
-			title: "Hide the built-in " + what + " " + n.Name + "?",
-			body:  "Nothing on disk changes. Press R later to restore hidden built-ins.",
-			yes: func(m *Model) tea.Cmd {
-				m.lib.Hide(n.ID)
-				m.saveLibrary("Hid " + n.Name)
-				return nil
-			},
-		})
-	default:
+	case n.Folder != nil:
+		f := n.Folder
 		body := "Only the entry is removed; the file on disk is not touched."
-		if n.Kind == kind.Folder && len(n.Children) > 0 {
-			body = fmt.Sprintf("The folder and its %d entries are removed from confnav. Files on disk are not touched.", len(n.Children))
+		if count := f.Count(); count > 0 || len(f.Folders) > 0 {
+			body = fmt.Sprintf("The folder and its %d entries are removed from confnav. Files on disk are not touched.", count)
+		}
+		if n.Parent == nil && f.Catalog != "" && m.opt.Catalog.Category(f.Catalog) != nil {
+			body += " You can add the built-in category back in preferences (" + m.keys.label("preferences") + ")."
 		}
 		m.openDialog(&confirm{title: "Remove " + n.Name + "?", body: body, yes: func(m *Model) tea.Cmd {
-			m.lib.Remove(n.ID)
-			m.saveLibrary("Removed " + n.Name)
+			st.AddIgnore(f.ScannedPaths()...)
+			st.RemoveFolder(n.ParentFolder(), f)
+			m.saveConfig("Removed " + n.Name)
+			return nil
+		}})
+	default:
+		e := n.Entry
+		body := "Only the entry is removed; the file on disk is not touched."
+		if e.Scanned {
+			body += " A new scan won't add it again."
+		}
+		m.openDialog(&confirm{title: "Remove " + n.Name + "?", body: body, yes: func(m *Model) tea.Cmd {
+			if e.Scanned {
+				st.AddIgnore(e.Path)
+			}
+			st.RemoveEntry(n.ParentFolder(), e)
+			m.saveConfig("Removed " + n.Name)
 			return nil
 		}})
 	}
-}
-
-func (m *Model) restoreHidden() {
-	count := len(m.lib.Hidden)
-	if count == 0 {
-		m.setStatus(sFaint, "Nothing is hidden")
-		return
-	}
-	m.openDialog(&confirm{
-		title: fmt.Sprintf("Restore %d hidden built-in item(s)?", count),
-		yes: func(m *Model) tea.Cmd {
-			m.lib.RestoreHidden()
-			m.saveLibrary(fmt.Sprintf("Restored %d item(s)", count))
-			return nil
-		},
-	})
 }
 
 // yank copies the full path to the clipboard with an OSC 52 escape
@@ -625,11 +591,12 @@ func (m *Model) yank(n *tree.Node) {
 	m.setStatus(sOK, "Copied "+n.FullPath())
 }
 
-func (m *Model) saveLibrary(okMsg string) {
-	err := m.lib.Save()
+// saveConfig writes config.toml after a change to the list or settings.
+func (m *Model) saveConfig(okMsg string) {
+	err := config.Save(m.opt.ConfigPath, m.cfg)
 	m.rebuild()
 	if err != nil {
-		m.fail("Could not save library: " + err.Error())
+		m.fail("Could not save config: " + err.Error())
 		return
 	}
 	m.setStatus(sOK, okMsg)

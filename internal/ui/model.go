@@ -16,8 +16,8 @@ import (
 	"github.com/fath-kip/confnav/internal/distro"
 	"github.com/fath-kip/confnav/internal/fsinfo"
 	"github.com/fath-kip/confnav/internal/kind"
-	"github.com/fath-kip/confnav/internal/library"
 	"github.com/fath-kip/confnav/internal/recent"
+	"github.com/fath-kip/confnav/internal/scan"
 	"github.com/fath-kip/confnav/internal/tree"
 )
 
@@ -28,10 +28,10 @@ type Options struct {
 	Family     distro.Family
 	Config     config.Config
 	ConfigPath string
-	FirstRun   bool // no config file yet: ask for an editor
-	Library    *library.Library
+	FirstRun   bool // no config file yet: open the preferences
 	Recent     *recent.List
 	Query      string // start in search mode with this query
+	Version    string // shown on the help page
 }
 
 type mode int
@@ -62,7 +62,6 @@ const doubleClick = 500 * time.Millisecond
 type Model struct {
 	opt     Options
 	cfg     config.Config
-	lib     *library.Library
 	recent  *recent.List
 	roots   []*tree.Node
 	entries []*tree.Node // search corpus
@@ -89,6 +88,11 @@ type Model struct {
 	lastClickRow int
 	lastClickAt  time.Time
 
+	helpOffset int // first help line on screen
+
+	scanning bool
+	runScan  func(scan.Roots) []scan.Found // scan.Run; tests replace it
+
 	now func() time.Time
 }
 
@@ -97,9 +101,9 @@ func New(opt Options) *Model {
 	m := &Model{
 		opt:      opt,
 		cfg:      opt.Config,
-		lib:      opt.Library,
 		recent:   opt.Recent,
 		expanded: map[string]bool{},
+		runScan:  scan.Run,
 		now:      time.Now,
 	}
 	m.search = textinput.New()
@@ -120,7 +124,7 @@ func New(opt Options) *Model {
 		m.startSearch(opt.Query)
 	}
 	if opt.FirstRun {
-		m.chooseEditor(true)
+		m.openPrefs(true)
 	}
 	return m
 }
@@ -137,6 +141,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.afterEdit(msg)
 	case copyDoneMsg:
 		return m, m.afterCopy(msg)
+	case sudoDoneMsg:
+		return m, m.afterSudo(msg)
+	case scanDoneMsg:
+		m.afterScan(msg)
 	case tea.MouseMsg:
 		return m, m.updateMouse(msg)
 	case tea.KeyMsg:
@@ -157,10 +165,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeDialog:
 			return m, m.dlg.update(m, msg)
 		case modeHelp:
-			m.mode = modeNormal
-			if msg.String() == "q" {
-				return m, tea.Quit
-			}
+			m.updateHelp(msg)
 			return m, nil
 		case modeSearch:
 			return m, m.updateSearch(msg)
@@ -203,9 +208,13 @@ func (m *Model) updateNormal(msg tea.KeyMsg) tea.Cmd {
 	case "open_with":
 		m.openWith(n)
 	case "editor":
-		m.chooseEditor(false)
+		m.chooseEditor()
 	case "settings":
 		return m.openSettings()
+	case "preferences":
+		m.openPrefs(false)
+	case "scan":
+		return m.startScan()
 	case "add":
 		m.addPrompt(n)
 	case "edit":
@@ -216,8 +225,6 @@ func (m *Model) updateNormal(msg tea.KeyMsg) tea.Cmd {
 		m.copyOrMove(n, true)
 	case "remove":
 		m.remove(n)
-	case "restore":
-		m.restoreHidden()
 	case "toggle_missing":
 		m.toggleMissing()
 	case "yank":
@@ -234,12 +241,21 @@ func (m *Model) updateNormal(msg tea.KeyMsg) tea.Cmd {
 	case "search":
 		m.startSearch("")
 	case "help":
-		m.mode = modeHelp
+		m.mode, m.helpOffset = modeHelp, 0
 	}
 	return nil
 }
 
 func (m *Model) updateMouse(msg tea.MouseMsg) tea.Cmd {
+	if m.mode == modeHelp {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.helpOffset -= 3
+		case tea.MouseButtonWheelDown:
+			m.helpOffset += 3
+		}
+		return nil
+	}
 	if m.mode != modeNormal && m.mode != modeSearch {
 		return nil
 	}
@@ -284,8 +300,7 @@ func (m *Model) updateMouse(msg tea.MouseMsg) tea.Cmd {
 // ---- tree and cursor ----
 
 func (m *Model) source() tree.Source {
-	return tree.Source{Catalog: m.opt.Catalog, Family: m.opt.Family, Library: m.lib, Recent: m.recent,
-		HideMissing: !m.cfg.ShowMissing}
+	return tree.Source{Structure: &m.cfg.Structure, Recent: m.recent, HideMissing: !m.cfg.ShowMissing}
 }
 
 // rebuild recreates the tree from the catalog, library and recent list,
@@ -378,6 +393,16 @@ func (m *Model) current() *tree.Node {
 
 func (m *Model) onPlus() bool {
 	return m.cursor >= 0 && m.cursor < len(m.rows) && m.rows[m.cursor].plus
+}
+
+// selectWhere puts the cursor on the first row whose node matches.
+func (m *Model) selectWhere(match func(*tree.Node) bool) {
+	for i, r := range m.rows {
+		if r.msg == "" && r.node != nil && match(r.node) {
+			m.cursor = i
+			return
+		}
+	}
 }
 
 func (m *Model) selectID(id string) bool {

@@ -18,4 +18,6 @@ var (
 	sModal      = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("4")).Padding(1, 2)
 	sModalTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Padding(0, 1)
 	sPicked     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4"))
+	sBox        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")).Padding(0, 1)
+	sKey        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 )

@@ -44,17 +44,17 @@ func TestBuildKeymap(t *testing.T) {
 	}
 
 	cfg := config.Default().Keys
-	cfg["edit"] = config.KeyList{"f2", "shift+r"} // shift+r is restore's key
+	cfg["edit"] = config.KeyList{"f2", "shift+m"} // shift+m is toggle_missing's key
 	cfg["quit"] = config.KeyList{"ctrl+c", "x"}
 	cfg["fly"] = config.KeyList{"z"}
 	km, warns = buildKeymap(cfg)
 	all := strings.Join(warns, "\n")
-	for _, want := range []string{`unknown action "fly"`, "ctrl+c is reserved", "shift+r is bound to both edit and restore; edit wins"} {
+	for _, want := range []string{`unknown action "fly"`, "ctrl+c is reserved", "shift+m is bound to both edit and toggle_missing; edit wins"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("missing warning %q in:\n%s", want, all)
 		}
 	}
-	if km.byKey["f2"] != "edit" || km.byKey["r"] != "" || km.byKey["x"] != "quit" || km.byKey["R"] != "edit" {
-		t.Errorf("unexpected bindings: f2=%q r=%q x=%q R=%q", km.byKey["f2"], km.byKey["r"], km.byKey["x"], km.byKey["R"])
+	if km.byKey["f2"] != "edit" || km.byKey["r"] != "" || km.byKey["x"] != "quit" || km.byKey["M"] != "edit" {
+		t.Errorf("unexpected bindings: f2=%q r=%q x=%q M=%q", km.byKey["f2"], km.byKey["r"], km.byKey["x"], km.byKey["M"])
 	}
 }

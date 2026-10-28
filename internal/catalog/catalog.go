@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/fath-kip/confnav/internal/config"
 	"github.com/fath-kip/confnav/internal/distro"
 	"github.com/fath-kip/confnav/internal/kind"
 )
@@ -40,10 +41,11 @@ type Entry struct {
 	Defaults string            `toml:"defaults"`
 }
 
-// CategoryID is the stable ID of a category, used for hiding it.
+// CategoryID is the tree ID of a catalog category.
 func CategoryID(id string) string { return "cat:" + id }
 
-// EntryID is the stable ID of an entry inside a category.
+// EntryID was the ID of an entry inside a category; library.json used it
+// for hidden entries.
 func EntryID(catID, path string) string { return catID + ":" + path }
 
 // For reports whether the entry applies to family f. Entries without a
@@ -121,3 +123,57 @@ func validate(e *Entry) error {
 	}
 	return nil
 }
+
+// Category returns the category with the given ID.
+func (c *Catalog) Category(id string) *Category {
+	for i := range c.Categories {
+		if c.Categories[i].ID == id {
+			return &c.Categories[i]
+		}
+	}
+	return nil
+}
+
+// Count returns how many entries of the category apply to family f.
+func (cat *Category) Count(f distro.Family) int {
+	n := 0
+	for _, e := range cat.Entries {
+		if e.For(f) {
+			n++
+		}
+	}
+	return n
+}
+
+// Seed copies categories into config folders with only the entries for
+// family f and their hints resolved. ids picks the categories (nil: all);
+// categories with nothing for f are left out.
+func (c *Catalog) Seed(f distro.Family, ids []string) []*config.Folder {
+	var out []*config.Folder
+	for i := range c.Categories {
+		cat := &c.Categories[i]
+		if ids != nil && !slices.Contains(ids, cat.ID) {
+			continue
+		}
+		folder := &config.Folder{Catalog: cat.ID, Name: cat.Name}
+		for _, e := range cat.Entries {
+			if e.For(f) {
+				folder.Entries = append(folder.Entries, &config.Entry{Name: e.Name, Desc: e.Desc, Path: e.Path,
+					Kind: e.Kind, Hint: e.HintFor(f), Defaults: e.Defaults})
+			}
+		}
+		if len(folder.Entries) > 0 {
+			out = append(out, folder)
+		}
+	}
+	return out
+}
+
+// DefaultStructure is what a new user starts with: an empty "My Configs"
+// folder and every category for family f.
+func (c *Catalog) DefaultStructure(f distro.Family) config.Structure {
+	return config.Structure{Categories: append([]*config.Folder{{Name: MyConfigs}}, c.Seed(f, nil)...)}
+}
+
+// MyConfigs is the name of the empty folder new users get for their own files.
+const MyConfigs = "My Configs"

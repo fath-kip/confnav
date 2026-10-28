@@ -25,15 +25,15 @@ func (m *Model) View() string {
 	var b strings.Builder
 	b.WriteString(m.titleLine())
 	b.WriteByte('\n')
-	b.WriteString(m.headerLine(cols))
+	if m.mode == modeHelp {
+		b.WriteString(m.helpBand())
+	} else {
+		b.WriteString(m.headerLine(cols))
+	}
 	b.WriteByte('\n')
 	switch {
 	case m.mode == modeHelp:
-		var help []string
-		for _, l := range strings.Split(m.helpText(), "\n") {
-			help = append(help, truncStyled(l, m.width))
-		}
-		b.WriteString(fit(strings.Join(help, "\n"), h))
+		b.WriteString(m.helpView(h))
 	case m.mode == modeDialog && m.dlg != nil:
 		// The modal replaces the list so it can't be overlooked.
 		b.WriteString(fit(lipgloss.Place(m.width, h, lipgloss.Center, lipgloss.Center, m.dlg.view(m.width)), h))
@@ -64,6 +64,9 @@ func (m *Model) titleLine() string {
 		right = keyHelp(m.keys.label("search"), "search", m.keys.label("help"), "help")
 		if m.missingHidden > 0 {
 			right = sFaint.Render(fmt.Sprintf("%d missing hidden", m.missingHidden)) + sFaint.Render(" · ") + right
+		}
+		if m.scanning {
+			right = sHint.Render("scanning…") + sFaint.Render(" · ") + right
 		}
 	}
 	space := m.width - lipgloss.Width(left) - lipgloss.Width(right)
@@ -157,7 +160,7 @@ func (m *Model) renderRow(r row, c columns, selected bool) string {
 	n := r.node
 	if n.Kind == kind.Folder && m.mode != modeSearch {
 		label := strings.Repeat("  ", r.depth) + m.marker(n)
-		if n.Origin == tree.User {
+		if n.Own() {
 			label += "★ "
 		}
 		label += n.Name
@@ -215,8 +218,8 @@ func (m *Model) statusLine() string {
 	if m.status != "" {
 		return m.statusStyle.Render(truncEnd(m.status, m.width))
 	}
-	if m.mode == modeDialog {
-		return "" // the row behind the modal is not what the user looks at
+	if m.mode == modeDialog || m.mode == modeHelp {
+		return "" // the row behind is not what the user looks at
 	}
 	if m.onPlus() && m.mode == modeNormal {
 		return sFaint.Render(fmt.Sprintf("Add a folder or file at the top level (%s or %s)",
@@ -227,14 +230,17 @@ func (m *Model) statusLine() string {
 		return ""
 	}
 	if n.Kind == kind.Folder {
-		switch n.Origin {
-		case tree.Recent:
+		what := "Category"
+		switch {
+		case n.Origin == tree.Recent:
 			return sFaint.Render("Files you opened recently")
-		case tree.User:
-			return sFaint.Render(fmt.Sprintf("Your folder · %d item(s) · %s adds a file or folder here",
-				len(n.Children), m.keys.label("add")))
+		case n.Own():
+			what = "Your folder"
+		case n.Folder.Scanned:
+			what = "Found by a scan"
 		}
-		return sFaint.Render(fmt.Sprintf("Built-in category · %d item(s)", len(n.Children)))
+		return sFaint.Render(fmt.Sprintf("%s · %d item(s) · %s adds a file or folder here",
+			what, len(n.Children), m.keys.label("add")))
 	}
 	parts := []string{sPath.Render(n.FullPath())}
 	if m.mode == modeSearch {
@@ -246,6 +252,9 @@ func (m *Model) statusLine() string {
 	if n.Defaults != "" && fsinfo.Stat(n.FullPath()).State == fsinfo.Missing &&
 		fsinfo.Stat(n.Defaults).State == fsinfo.Present {
 		parts = append(parts, sFaint.Render("defaults in "+n.Defaults))
+	}
+	if n.Entry != nil && n.Entry.Scanned {
+		parts = append(parts, sFaint.Render("found by scan"))
 	}
 	if tool := editor.Tool(n.FullPath()); tool != "" {
 		parts = append(parts, sFaint.Render("opens with "+tool))
@@ -261,7 +270,7 @@ func (m *Model) keysLine() string {
 	case modeSearch:
 		return keyHelp("enter", "open", "↑↓", "move", "esc", "show in tree", "ctrl+c", "quit")
 	case modeHelp:
-		return keyHelp("any key", "close help")
+		return keyHelp("↑↓ pgup pgdn", "scroll", "esc", "close help")
 	case modeDialog:
 		return "" // the modal shows its own keys
 	}
@@ -272,7 +281,7 @@ func (m *Model) keysLine() string {
 	var pairs []string
 	for _, a := range [][2]string{
 		{"open", "open"}, {"add", "add"}, {"edit", "edit"}, {"remove", "remove"},
-		{"search", "search"}, {"editor", "editor"}, {"settings", "settings"},
+		{"search", "search"}, {"settings", "settings"}, {"preferences", "prefs"},
 		{"toggle_missing", missing}, {"help", "help"}, {"quit", "quit"},
 	} {
 		if k := m.keys.label(a[0]); k != "" {
@@ -280,65 +289,6 @@ func (m *Model) keysLine() string {
 		}
 	}
 	return keyHelp(pairs...)
-}
-
-func (m *Model) helpText() string {
-	type item struct{ action, desc string }
-	settingsKey := m.keys.label("settings")
-	if settingsKey == "" {
-		settingsKey = "the settings action"
-	}
-	sections := []struct {
-		title string
-		items []item
-		note  string
-	}{
-		{"Move", []item{{"up", "up"}, {"down", "down"}, {"collapse", "collapse or go to parent"},
-			{"expand", "expand"}, {"top", "top"}, {"bottom", "bottom"}, {"page_up", "page up"},
-			{"page_down", "page down"}}, ""},
-		{"Open", []item{{"open", "open file or toggle folder"}, {"open_with", "open once with another editor"},
-			{"editor", "set default editor"}, {"settings", "open confnav's settings (config.toml)"}},
-			"Files you can't write open with sudoedit; sudoers, passwd and group open with visudo, vipw and vigr."},
-		{"Organise", []item{{"add", "add a file, directory, glob or folder (the + row adds at the top level)"},
-			{"edit", "rename / edit"}, {"copy", "copy to folder"}, {"move", "move to folder"},
-			{"remove", "remove (built-ins are hidden)"}, {"restore", "restore hidden built-ins"},
-			{"toggle_missing", "show or hide files that don't exist on this system"}}, ""},
-		{"Other", []item{{"search", "search everything"}, {"yank", "copy path to clipboard"},
-			{"refresh", "refresh and reload settings"}, {"help", "help"}, {"quit", "quit"}},
-			"Change any key in config.toml ([keys]; " + settingsKey + " opens it); saving applies it at once."},
-		{"Files", nil, "confnav never deletes or changes files on disk; removing only affects its own lists."},
-		{"Mouse", nil, "Click a folder to toggle it, double-click a file or the + row to open it, scroll with the wheel."},
-	}
-	const titleW = 9
-	body := lipgloss.NewStyle().Width(max(20, m.width-titleW-4))
-	indent := strings.Repeat(" ", titleW+4)
-	lines := []string{sBold.Render("Keys"), ""}
-	add := func(title, text string) {
-		for i, l := range strings.Split(body.Render(text), "\n") {
-			if i == 0 {
-				lines = append(lines, "  "+sFolder.Render(pad(title, titleW))+"  "+l)
-			} else {
-				lines = append(lines, indent+l)
-			}
-		}
-	}
-	for _, sec := range sections {
-		var parts []string
-		for _, it := range sec.items {
-			if k := m.keys.labels(it.action); k != "" {
-				parts = append(parts, sBold.Render(k)+" "+it.desc)
-			}
-		}
-		title := sec.title
-		if len(parts) > 0 {
-			add(title, strings.Join(parts, sFaint.Render(" · ")))
-			title = ""
-		}
-		if sec.note != "" {
-			add(title, sFaint.Render(sec.note))
-		}
-	}
-	return strings.Join(lines, "\n")
 }
 
 // truncStyled cuts a string that already contains colour codes.

@@ -6,54 +6,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fath-kip/confnav/internal/catalog"
-	"github.com/fath-kip/confnav/internal/distro"
+	"github.com/fath-kip/confnav/internal/config"
 	"github.com/fath-kip/confnav/internal/kind"
-	"github.com/fath-kip/confnav/internal/library"
 	"github.com/fath-kip/confnav/internal/recent"
 )
 
-const testCatalog = `
-[[category]]
-id = "dns"
-name = "DNS"
-  [[category.entry]]
-  name = "hosts"
-  desc = "Static hosts"
-  path = "/etc/hosts"
-  [[category.entry]]
-  name = "resolved.conf"
-  desc = "resolved"
-  path = "/etc/systemd/resolved.conf"
-  hint = "restart resolved"
-  [[category.entry]]
-  name = "apt only"
-  desc = "debian thing"
-  path = "/etc/apt/x"
-  distros = ["debian"]
-
-[[category]]
-id = "pkg"
-name = "Packages"
-  [[category.entry]]
-  name = "sources.list"
-  desc = "apt"
-  path = "/etc/apt/sources.list"
-  distros = ["debian"]
-`
-
 func source(t *testing.T) Source {
 	t.Helper()
-	c, err := catalog.Parse([]byte(testCatalog))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
 	return Source{
-		Catalog: c,
-		Family:  distro.Arch,
-		Library: library.New(filepath.Join(dir, "library.json")),
-		Recent:  recent.Load(filepath.Join(dir, "recent.json"), 10),
+		Structure: &config.Structure{Categories: []*config.Folder{
+			{Name: "My Configs"},
+			{Catalog: "dns", Name: "DNS", Entries: []*config.Entry{
+				{Name: "hosts", Desc: "Static hosts", Path: "/etc/hosts", Kind: kind.File},
+				{Name: "resolved.conf", Desc: "resolved", Path: "/etc/systemd/resolved.conf", Kind: kind.File, Hint: "restart resolved"},
+			}},
+		}},
+		Recent: recent.Load(filepath.Join(t.TempDir(), "recent.json"), 10),
 	}
 }
 
@@ -82,59 +50,49 @@ func equal(a, b []string) bool {
 	return true
 }
 
-func TestBuildFiltersAndOrders(t *testing.T) {
+func TestBuildFollowsStructure(t *testing.T) {
 	s := source(t)
+	dns := s.Structure.Categories[1]
+	dns.Folders = []*config.Folder{{Name: "VPN", Entries: []*config.Entry{{Name: "wg", Path: "/etc/wg.conf", Kind: kind.File}}}}
+	s.Structure.Entries = []*config.Entry{{Name: "top", Path: "/etc/top.conf", Kind: kind.File}}
+
 	roots := build(s)
-	// Packages has no arch entries, so it disappears.
-	if got := names(roots); !equal(got, []string{"Recent", "My Configs", "DNS"}) {
+	if got := names(roots); !equal(got, []string{"Recent", "My Configs", "DNS", "top"}) {
 		t.Fatalf("roots = %v", got)
 	}
-	dns := roots[2]
-	if got := names(dns.Children); !equal(got, []string{"hosts", "resolved.conf"}) {
+	d := roots[2]
+	if got := names(d.Children); !equal(got, []string{"VPN", "hosts", "resolved.conf"}) {
 		t.Errorf("DNS children = %v", got)
 	}
-	if dns.Children[1].Hint != "restart resolved" || dns.Children[0].Parent != dns {
-		t.Error("hint or parent not set")
+	if d.ID != "cat:dns" || d.Children[0].ID != "cat:dns/VPN" || d.Children[1].ID != "cat:dns:/etc/hosts" {
+		t.Errorf("IDs = %q %q %q", d.ID, d.Children[0].ID, d.Children[1].ID)
 	}
-	if c, ok := dns.Container(); !ok || c != "cat:dns" {
-		t.Errorf("Container() = %q %v", c, ok)
+	if d.Children[2].Hint != "restart resolved" || d.Children[1].Parent != d || d.Children[1].Entry != dns.Entries[0] {
+		t.Error("hint, parent or entry not set")
+	}
+	if c, ok := d.Container(); !ok || c != dns {
+		t.Errorf("Container() = %v %v", c, ok)
 	}
 	if _, ok := roots[0].Container(); ok {
 		t.Error("Recent must not accept inserts")
 	}
+	if roots[1].ID != "f:My Configs" || !roots[1].Own() || d.Own() || !d.Children[0].Own() {
+		t.Error("Own() should mark folders the user made")
+	}
+	if d.Children[0].Children[0].ParentFolder() != dns.Folders[0] || roots[3].ParentFolder() != nil {
+		t.Error("ParentFolder() wrong")
+	}
+	if got := d.Children[0].Children[0].Crumb(); got != "DNS › VPN" {
+		t.Errorf("Crumb() = %q", got)
+	}
 }
 
-func TestBuildAppliesLibrary(t *testing.T) {
+func TestRepeatedNamesGetUniqueIDs(t *testing.T) {
 	s := source(t)
-	lib := s.Library
-	lib.Hide("dns:/etc/hosts")
-	lib.SetOverride("cat:dns", "Name resolution", "")
-	lib.Insert("cat:dns", &library.Node{ID: "u:1", Kind: kind.File, Name: "mine", Path: "/etc/mine.conf"})
-	lib.Insert(lib.Folders[0].ID, &library.Node{ID: "u:2", Kind: kind.File, Name: "resolved", Path: "/etc/systemd/resolved.conf"})
-
+	s.Structure.Categories = append(s.Structure.Categories, &config.Folder{Name: "My Configs"})
 	roots := build(s)
-	dns := roots[2]
-	if dns.Name != "Name resolution" {
-		t.Errorf("override not applied: %q", dns.Name)
-	}
-	if got := names(dns.Children); !equal(got, []string{"resolved.conf", "mine"}) {
-		t.Errorf("DNS children = %v", got)
-	}
-	if dns.Children[1].Origin != User {
-		t.Error("extra must have User origin")
-	}
-	// A user entry pointing at a catalog file inherits its hint and description.
-	mine := roots[1].Children[0]
-	if mine.Hint != "restart resolved" || mine.Desc != "resolved" {
-		t.Errorf("user entry did not inherit catalog info: %+v", mine)
-	}
-	if mine.Crumb() != "My Configs" {
-		t.Errorf("Crumb() = %q", mine.Crumb())
-	}
-
-	lib.Hide("cat:dns")
-	if got := names(build(s)); !equal(got, []string{"Recent", "My Configs"}) {
-		t.Errorf("hidden category still shown: %v", got)
+	if roots[1].ID == roots[3].ID {
+		t.Errorf("two folders share the ID %q", roots[1].ID)
 	}
 }
 
@@ -147,7 +105,7 @@ func TestBuildRecent(t *testing.T) {
 		t.Fatalf("recent = %v", got)
 	}
 	if r.Children[0].Desc != "resolved" || r.Children[0].Hint != "restart resolved" {
-		t.Errorf("recent item missing catalog info: %+v", r.Children[0])
+		t.Errorf("recent item missing the listed entry's info: %+v", r.Children[0])
 	}
 }
 
@@ -192,37 +150,17 @@ func TestHideMissing(t *testing.T) {
 	dir := t.TempDir()
 	present := filepath.Join(dir, "present.conf")
 	os.WriteFile(present, nil, 0o644)
-	c, err := catalog.Parse([]byte(`
-[[category]]
-id = "a"
-name = "A"
-  [[category.entry]]
-  name = "present"
-  desc = "d"
-  path = "` + present + `"
-  [[category.entry]]
-  name = "gone"
-  desc = "d"
-  path = "` + dir + `/gone.conf"
-  [[category.entry]]
-  name = "no match"
-  desc = "d"
-  path = "` + dir + `/*.nothing"
-  kind = "glob"
-[[category]]
-id = "b"
-name = "B"
-  [[category.entry]]
-  name = "gone too"
-  desc = "d"
-  path = "` + dir + `/gone2.conf"
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
 	s := source(t)
-	s.Catalog = c
-	s.Library.Insert(s.Library.Folders[0].ID, &library.Node{ID: "u:1", Kind: kind.File, Name: "mine", Path: dir + "/not-yet.conf"})
+	s.Structure.Categories = []*config.Folder{
+		{Name: "My Configs", Entries: []*config.Entry{{Name: "mine", Path: dir + "/not-yet.conf", Kind: kind.File}}},
+		{Catalog: "a", Name: "A", Entries: []*config.Entry{
+			{Name: "present", Path: present, Kind: kind.File},
+			{Name: "gone", Path: dir + "/gone.conf", Kind: kind.File},
+			{Name: "no match", Path: dir + "/*.nothing", Kind: kind.Glob},
+		}},
+		{Catalog: "b", Name: "B", Entries: []*config.Entry{{Name: "gone too", Path: dir + "/gone2.conf", Kind: kind.File}}},
+		{Name: "Empty"},
+	}
 	s.Recent.Add(dir+"/gone.conf", time.Now())
 	s.HideMissing = true
 
@@ -230,16 +168,17 @@ name = "B"
 	if hidden != 3 {
 		t.Errorf("hidden = %d, want 3", hidden)
 	}
-	if got := names(roots); !equal(got, []string{"Recent", "My Configs", "A"}) {
-		t.Fatalf("roots = %v (category B is empty and must go)", got)
+	if got := names(roots); !equal(got, []string{"Recent", "My Configs", "A", "Empty"}) {
+		t.Fatalf("roots = %v (category B is empty because of hiding and must go)", got)
 	}
 	if got := names(roots[2].Children); !equal(got, []string{"present"}) {
 		t.Errorf("A = %v", got)
 	}
 	if len(roots[1].Children) != 1 || len(roots[0].Children) != 1 {
-		t.Error("user entries and recent items must not be filtered")
+		t.Error("your own entries and recent items must not be filtered")
 	}
-	if _, hidden := Build(Source{Catalog: c, Library: s.Library, Recent: s.Recent}); hidden != 0 {
+	s.HideMissing = false
+	if _, hidden := Build(s); hidden != 0 {
 		t.Error("nothing is hidden without HideMissing")
 	}
 }
