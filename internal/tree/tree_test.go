@@ -243,17 +243,3 @@ name = "B"
 		t.Error("nothing is hidden without HideMissing")
 	}
 }
-
-func TestAppConfigEntry(t *testing.T) {
-	s := source(t)
-	s.AppConfig = "/home/u/.config/confnav/config.toml"
-	roots := build(s)
-	last := roots[len(roots)-1]
-	if last.ID != AppConfigID || last.Path != s.AppConfig || last.Origin != Builtin || last.Parent != nil {
-		t.Fatalf("last root = %+v", last)
-	}
-	s.Library.Hide(AppConfigID)
-	if roots := build(s); roots[len(roots)-1].ID == AppConfigID {
-		t.Error("app config entry must be hideable")
-	}
-}

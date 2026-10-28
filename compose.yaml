@@ -1,0 +1,47 @@
+# Build, test and lint confnav in containers, so the host needs no Go toolchain:
+#
+#   podman-compose run --rm test       gofmt check, go vet and go test
+#   podman-compose run --rm build      static ./confnav binary (VERSION=… sets --version)
+#   podman-compose run --rm lint       golangci-lint
+#   podman-compose run --rm snapshot   all release packages in ./dist
+#
+# docker compose works the same way. The module and build caches are kept in
+# named volumes, so later runs are fast and work offline.
+
+x-podman:
+  in_pod: false # one-off runs; don't leave an empty pod behind
+
+x-go: &go
+  image: docker.io/library/golang:1
+  working_dir: /src
+  volumes:
+    - .:/src:Z
+    - gomod:/go/pkg/mod
+    - gocache:/root/.cache/go-build
+  environment:
+    CGO_ENABLED: "0"
+
+services:
+  test:
+    <<: *go
+    command: ["sh", "-c", "test -z \"$$(gofmt -l .)\" || { gofmt -l .; exit 1; }; go vet ./... && go test ./..."]
+
+  build:
+    <<: *go
+    command: ["go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=${VERSION:-dev}", "-o", "confnav", "./cmd/confnav"]
+
+  lint:
+    <<: *go
+    image: docker.io/golangci/golangci-lint:latest
+    command: ["golangci-lint", "run"]
+
+  snapshot:
+    <<: *go
+    image: docker.io/goreleaser/goreleaser:latest
+    command: ["release", "--snapshot", "--clean"]
+
+volumes:
+  gomod:
+    name: confnav-gomod
+  gocache:
+    name: confnav-gocache

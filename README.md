@@ -18,11 +18,10 @@ NAME                  DESCRIPTION                               PATH            
   ▸ resolved.conf.d/  Drop-in overrides for systemd-resolved    /etc/systemd/resolved.conf.d  missing
 ▸ Systemd (10)
 ▸ Boot (8)
-  confnav settings    Editor, key bindings, mouse, backups      ~/.config/confnav/config.toml 2026-10-23 19:24
 +
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 /etc/systemd/resolved.conf · after edit: sudo systemctl restart systemd-resolved
-enter open · a add · r edit · d remove · / search · shift+e editor · shift+m hide missing · ? help · q quit
+enter open · a add · r edit · d remove · / search · shift+e editor · shift+s settings · shift+m hide missing · ? help · q quit
 ```
 
 ## Features
@@ -43,8 +42,8 @@ enter open · a add · r edit · d remove · / search · shift+e editor · shift
   don't need. confnav never deletes or changes files on disk.
 - **Hide what you don't have**: `shift+m` hides every built-in file that doesn't exist on your system
   and shows them again. Install a package later and its files simply appear.
-- **Its own settings are in the list** ("confnav settings"). Save the file and the new settings,
-  key bindings included, apply immediately.
+- **Its own settings are one key away**: `shift+s` opens confnav's config file. Save it and the new
+  settings, key bindings included, apply immediately.
 - **Recent** list of the files you opened last, plus fuzzy **search** over everything.
 - A single static binary of about 5 MB with no runtime dependencies. Works with the mouse too.
 
@@ -79,6 +78,7 @@ confnav --distro fedora   use another distribution's catalog
 | `enter`, `space` | open the file, or toggle the folder |
 | `o` | open once with another editor |
 | `shift+e` | choose the default editor |
+| `shift+s` | open confnav's own settings (`config.toml`) |
 | `/` | search; `esc` shows the result in the tree |
 | `a` | add a file, directory, glob or folder to the selected folder (`tab` completes paths) |
 | `r` | rename or edit |
@@ -97,7 +97,7 @@ toggles a folder and a double-click opens a file.
 ## Configuration
 
 On first start confnav asks which editor to use. Settings live in `~/.config/confnav/config.toml`,
-which is listed in the app as **confnav settings**; saving it applies the changes immediately
+which `shift+s` opens in your editor; saving it applies the changes immediately
 (a file with a syntax error keeps the previous settings and shows the error).
 
 ```toml
@@ -116,8 +116,8 @@ quit = "q"
 ```
 
 The actions are `up`, `down`, `collapse`, `expand`, `top`, `bottom`, `page_up`, `page_down`, `open`,
-`open_with`, `editor`, `add`, `edit`, `copy`, `move`, `remove`, `restore`, `toggle_missing`, `yank`,
-`refresh`, `search`, `help` and `quit`. Actions you leave out keep their default keys; `ctrl+c` always
+`open_with`, `editor`, `settings`, `add`, `edit`, `copy`, `move`, `remove`, `restore`, `toggle_missing`,
+`yank`, `refresh`, `search`, `help` and `quit`. Actions you leave out keep their default keys; `ctrl+c` always
 quits. Unknown actions and keys bound twice are reported in the status line.
 
 Your folders, hidden entries and renames are stored in `~/.local/share/confnav/library.json` and
@@ -135,6 +135,17 @@ header documents every field. `go test ./...` validates it.
 go build ./cmd/confnav
 go test ./...
 goreleaser release --snapshot --clean   # build all release packages locally
+```
+
+Without Go on the host, [`compose.yaml`](compose.yaml) runs the same steps in containers
+(`podman-compose` or `docker compose`):
+
+```
+podman-compose run --rm test       # gofmt check, go vet, go test
+podman-compose run --rm build      # ./confnav; VERSION=1.2.3 sets --version
+podman-compose run --rm lint       # golangci-lint
+podman-compose run --rm snapshot   # all release packages in ./dist
+sudo install -Dm755 confnav /usr/local/bin/confnav
 ```
 
 Releases are built by GitHub Actions when a `v*` tag is pushed.

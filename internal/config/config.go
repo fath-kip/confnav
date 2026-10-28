@@ -70,6 +70,7 @@ var DefaultKeys = []Binding{
 	{"open", KeyList{"enter", "space"}},
 	{"open_with", KeyList{"o"}},
 	{"editor", KeyList{"E"}},
+	{"settings", KeyList{"S"}},
 	{"add", KeyList{"a"}},
 	{"edit", KeyList{"r"}},
 	{"copy", KeyList{"c"}},

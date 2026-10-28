@@ -28,9 +28,6 @@ const (
 // RecentID is the ID of the Recent folder.
 const RecentID = "recent"
 
-// AppConfigID is the ID of the entry for confnav's own config.toml.
-const AppConfigID = "app:config"
-
 // Node is one row of the tree.
 type Node struct {
 	ID       string
@@ -89,15 +86,13 @@ type Source struct {
 	Family  distro.Family
 	Library *library.Library
 	Recent  *recent.List
-	// AppConfig is the path of confnav's config.toml, listed at the top level.
-	AppConfig string
 	// HideMissing leaves out built-in entries that don't exist on disk.
 	HideMissing bool
 }
 
-// Build returns the top-level nodes: Recent, the user's own nodes, the
-// catalog categories for the current distro family and confnav's own
-// settings. It also returns how many built-ins HideMissing left out.
+// Build returns the top-level nodes: Recent, the user's own nodes and the
+// catalog categories for the current distro family. It also returns how
+// many built-ins HideMissing left out.
 func Build(s Source) ([]*Node, int) {
 	hidden := 0
 	known := map[string]*Node{} // expanded path → first built-in node, for descriptions and hints
@@ -152,13 +147,6 @@ func Build(s Source) ([]*Node, int) {
 		if len(cn.Children) > 0 {
 			roots = append(roots, cn)
 		}
-	}
-	if s.AppConfig != "" && !s.Library.IsHidden(AppConfigID) {
-		n := &Node{ID: AppConfigID, Kind: kind.File, Name: "confnav settings",
-			Desc: "Editor, key bindings, mouse, backups", Path: s.AppConfig,
-			Hint: "changes apply as soon as you save", Origin: Builtin}
-		applyOverride(n, s.Library)
-		roots = append(roots, n)
 	}
 	return roots, hidden
 }

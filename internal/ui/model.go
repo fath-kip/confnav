@@ -204,6 +204,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) tea.Cmd {
 		m.openWith(n)
 	case "editor":
 		m.chooseEditor(false)
+	case "settings":
+		return m.openSettings()
 	case "add":
 		m.addPrompt(n)
 	case "edit":
@@ -283,7 +285,7 @@ func (m *Model) updateMouse(msg tea.MouseMsg) tea.Cmd {
 
 func (m *Model) source() tree.Source {
 	return tree.Source{Catalog: m.opt.Catalog, Family: m.opt.Family, Library: m.lib, Recent: m.recent,
-		AppConfig: m.opt.ConfigPath, HideMissing: !m.cfg.ShowMissing}
+		HideMissing: !m.cfg.ShowMissing}
 }
 
 // rebuild recreates the tree from the catalog, library and recent list,

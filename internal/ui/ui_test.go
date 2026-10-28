@@ -548,11 +548,11 @@ func TestToggleMissing(t *testing.T) {
 	e.lacks(t, "missing hidden")
 }
 
-func TestOwnConfigEntryAndReload(t *testing.T) {
+func TestSettingsKeyAndReload(t *testing.T) {
 	e := setup(t, false)
-	e.goTo(t, "confnav settings")
-	e.has(t, config.Path())
-	if cmd := e.press("enter"); cmd == nil {
+	e.lacks(t, "confnav settings") // the settings key replaced the top-level entry
+	e.has(t, "shift+s settings")
+	if cmd := e.press("S"); cmd == nil {
 		t.Fatal("opening the settings should launch the editor right away")
 	}
 	before := fsinfo.Stat(config.Path())

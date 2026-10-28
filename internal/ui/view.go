@@ -272,7 +272,7 @@ func (m *Model) keysLine() string {
 	var pairs []string
 	for _, a := range [][2]string{
 		{"open", "open"}, {"add", "add"}, {"edit", "edit"}, {"remove", "remove"},
-		{"search", "search"}, {"editor", "editor"},
+		{"search", "search"}, {"editor", "editor"}, {"settings", "settings"},
 		{"toggle_missing", missing}, {"help", "help"}, {"quit", "quit"},
 	} {
 		if k := m.keys.label(a[0]); k != "" {
@@ -284,6 +284,10 @@ func (m *Model) keysLine() string {
 
 func (m *Model) helpText() string {
 	type item struct{ action, desc string }
+	settingsKey := m.keys.label("settings")
+	if settingsKey == "" {
+		settingsKey = "the settings action"
+	}
 	sections := []struct {
 		title string
 		items []item
@@ -293,7 +297,7 @@ func (m *Model) helpText() string {
 			{"expand", "expand"}, {"top", "top"}, {"bottom", "bottom"}, {"page_up", "page up"},
 			{"page_down", "page down"}}, ""},
 		{"Open", []item{{"open", "open file or toggle folder"}, {"open_with", "open once with another editor"},
-			{"editor", "set default editor"}},
+			{"editor", "set default editor"}, {"settings", "open confnav's settings (config.toml)"}},
 			"Files you can't write open with sudoedit; sudoers, passwd and group open with visudo, vipw and vigr."},
 		{"Organise", []item{{"add", "add a file, directory, glob or folder (the + row adds at the top level)"},
 			{"edit", "rename / edit"}, {"copy", "copy to folder"}, {"move", "move to folder"},
@@ -301,7 +305,7 @@ func (m *Model) helpText() string {
 			{"toggle_missing", "show or hide files that don't exist on this system"}}, ""},
 		{"Other", []item{{"search", "search everything"}, {"yank", "copy path to clipboard"},
 			{"refresh", "refresh and reload settings"}, {"help", "help"}, {"quit", "quit"}},
-			"Change any key in \"confnav settings\" ([keys] in config.toml); saving applies it at once."},
+			"Change any key in config.toml ([keys]; " + settingsKey + " opens it); saving applies it at once."},
 		{"Files", nil, "confnav never deletes or changes files on disk; removing only affects its own lists."},
 		{"Mouse", nil, "Click a folder to toggle it, double-click a file or the + row to open it, scroll with the wheel."},
 	}

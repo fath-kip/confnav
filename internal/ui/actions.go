@@ -291,6 +291,14 @@ func (m *Model) chooseEditor(firstRun bool) {
 	})
 }
 
+// openSettings opens confnav's own config.toml; saving it applies the
+// changes at once (see afterEdit).
+func (m *Model) openSettings() tea.Cmd {
+	n := &tree.Node{Kind: kind.File, Name: "config.toml", Path: m.opt.ConfigPath,
+		Hint: "changes apply as soon as you save"}
+	return m.openFile(n, "")
+}
+
 // ---- organising ----
 
 // target says where new nodes go: a library container and its tree node
