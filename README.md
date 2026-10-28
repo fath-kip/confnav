@@ -6,23 +6,7 @@ confnav shows the well-known config files of **Arch, Debian and Fedora** (and th
 such as CachyOS, EndeavourOS, Manjaro, Ubuntu, Mint, Nobara) grouped by topic. Pick one and it opens
 in your editor, through `sudoedit` when the file belongs to root.
 
-```
-confnav  CachyOS · arch                                                        / search · ? help
-NAME                  DESCRIPTION                               PATH                          MODIFIED
-▸ Recent (3)
-▸ ★ My Configs (4)
-▾ DNS (6)
-    resolv.conf       Nameservers and search domains            /etc/resolv.conf              2026-10-20 14:32
-    hosts             Static hostname to IP mappings            /etc/hosts                    2026-08-11 09:10
-    resolved.conf     systemd-resolved: DNS servers, DNS ove…   /etc/systemd/resolved.conf    2026-09-02 09:10
-  ▸ resolved.conf.d/  Drop-in overrides for systemd-resolved    /etc/systemd/resolved.conf.d  missing
-▸ Systemd (10)
-▸ Boot (8)
-+
-────────────────────────────────────────────────────────────────────────────────────────────────────
-/etc/systemd/resolved.conf · after edit: sudo systemctl restart systemd-resolved
-enter open · a add · r edit · d remove · / search · shift+s settings · shift+p prefs · shift+m hide missing · ? help · q quit
-```
+![confnav with a few categories open](images/ss-3.png)
 
 ## Features
 
@@ -54,6 +38,14 @@ enter open · a add · r edit · d remove · / search · shift+s settings · shi
   settings, key bindings included, apply immediately.
 - **Recent** list of the files you opened last, plus fuzzy **search** over everything.
 - A single static binary of about 5 MB with no runtime dependencies. Works with the mouse too.
+
+<p>
+  <img src="images/ss-1.png" width="49%" alt="All categories collapsed after a scan, with Applications and Other added">
+  <img src="images/ss-2.png" width="49%" alt="The Network category after a scan, with missing files hidden">
+</p>
+
+After a scan: the new *Applications* and *Other* categories (left), and the files a scan added to
+Network below the built-in entries, with missing files hidden (right).
 
 ## Install
 
@@ -104,10 +96,16 @@ confnav --distro fedora   use another distribution's catalog for new categories
 The `+` row at the bottom adds at the top level (enter or double-click). With the mouse, a click
 toggles a folder and a double-click opens a file.
 
+![The help page](images/help_menu.png)
+
 ## Configuration
 
 On first start confnav asks a few questions (editor, categories, missing files, scanning); `shift+p`
-asks them again later. Everything is stored in `~/.config/confnav/config.toml`, which `shift+s` opens
+asks them again later.
+
+![Choosing categories on first start](images/choose_categori.png)
+
+Everything is stored in `~/.config/confnav/config.toml`, which `shift+s` opens
 in your editor. Saving it applies the changes immediately; a file with an error keeps the previous
 settings and shows the error. Every setting and key has its explanation in a comment above it:
 
